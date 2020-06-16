@@ -33,7 +33,7 @@ def associate(dataframe, swath, variable='Integer_Cloud_Mask'):
                             breadth_first=True,
                             return_distance=False)
     
-    extract = swath['geophysical_data'][variable]
+    extract = swath['geophysical_data'][variable].value
     new_column = extract.ravel()[indicies]
     dataframe[variable] = new_column
     return dataframe

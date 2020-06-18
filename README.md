@@ -18,21 +18,14 @@ Fetch, classify, and label ICESat-2 data
 To use the tools in this project, use:
 
 ```
-conda create --name cloudmask --file cloudmaskenv.lock 
-conda activate cloudmask
-PIP_USER=True pip install git+https://github.com/jonathan-taylor/regreg.git
+conda install --yes -c conda-forge cython gcc_linux-64
+python -m pip install --user --upgrade git+https://github.com/jonathan-taylor/regreg.git
 ```
 
 You can then verify that the regreg package was correctly installed via:
+
 ```
 python -c "import regreg"
 ```
 
-You may need to re-run the conda commands upon hub restart:
-
-```
-conda create --name cloudmask --file cloudmaskenv.lock 
-conda activate cloudmask
-```
-
-but the pip one should leave regreg installed across reboots.
+The above commands only need to be re-run if an upgrade to `regreg` is needed. Otherwise the user-level installation of `regreg` will survive across hub reboots.

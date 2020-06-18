@@ -12,8 +12,8 @@ def associate(dataframe, swath, variable='Integer_Cloud_Mask'):
     
     # grab swath coordinates
     # TODO; make general for inferring lat/lon paths
-    latS = np.array(f['geolocation_data']['latitude'])
-    lonS = np.array(f['geolocation_data']['longitude'])
+    latS = np.array(swath['geolocation_data']['latitude'])
+    lonS = np.array(swath['geolocation_data']['longitude'])
 
     S_rad = np.vstack([lonS[:].ravel(),latS[:].ravel()]).T
     S_rad *= np.pi / 180.

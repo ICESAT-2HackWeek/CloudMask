@@ -120,6 +120,7 @@ $$
 $$
 with $\eta_j = X\Theta[:,j]$.            
 
+In fact, fixing $\Theta$, we could solve for $\alpha_j$ but this seems messy.
 
 
 ### Putting these together
@@ -249,6 +250,7 @@ np.percentile(D['w_surface_window_final'], [2,98])
 
 ```{python}
 X, desc2 = make_design(D, desc)
+#X = X[np.random.choice(np.arange(X.shape[0]), 50000, replace=False)]
 desc2
 np.unique(D['snr']), np.unique(D['h_rb'])
 ```
@@ -301,7 +303,7 @@ class full_loss(rr.smooth_atom):
                  initial=None):
         
         (self.X, 
-         self.symmetrize) = (X, symmetrize)
+         self.symmetrize) = (X.copy(), symmetrize)
 
         # create individual losses
         # categorical / binary
@@ -312,23 +314,26 @@ class full_loss(rr.smooth_atom):
         
         idx_cont = 0
         self.desc = []
+        self.sum_sq = []
         for var, dtype, idx in desc:
             if dtype in ['binary', 'categorical']:
-                response = X[:,idx]
+                response = self.X[:,idx]
                 self.desc.append((var, dtype, idx,
                                   multinomial_loglike(response.shape,
                                                       response), 
                                   None))
             elif dtype == 'continuous':
-                response = np.squeeze(X[:,idx]) # it will be a 2D array
+                response = np.squeeze(self.X[:,idx]) # it will be a 2D array
                 if var not in ['snr', 'w_surface_window_final', 'intercept']:
                     l, u = np.percentile(response, [5, 95]) # quick and dirty cleaning..
                     response = np.clip(response, l, u)
                 elif var == 'w_surface_window_final':
                     l, u = np.percentile(response, [2, 98]) # quick and dirty cleaning..
                     response = np.clip(response, l, u)
+                response -= np.mean(response)
                 response /= np.std(response)
-                X[:,idx] = response[:,None]
+                self.X[:,idx] = response[:,None]
+                self.sum_sq.append((response**2).sum())
                 self.desc.append((var, dtype, idx,
                                   gaussian_loglike(response.shape,
                                                    response),
@@ -346,7 +351,7 @@ class full_loss(rr.smooth_atom):
         
         self.matrix_slice = slice(0, X.shape[1]**2, None)
         self.scale_slice = slice(X.shape[1]**2, X.shape[1]**2 + idx_cont, None)
-        
+        self.sum_sq = np.array(self.sum_sq)
         self._grad_buff = np.zeros((X.shape[1], 
                                     X.shape[1]))
         
@@ -355,6 +360,7 @@ class full_loss(rr.smooth_atom):
         arg = self.apply_offset(arg)
         matrix_arg = arg[self.matrix_slice].reshape((self._grad_buff.shape))
         scale_arg = arg[self.scale_slice]
+        scale_arg = np.maximum(scale_arg, 1.e-14)
         scale_grad = np.zeros_like(scale_arg)
         full_grad = np.zeros(self.shape)
         eta = natural_param = self.X.dot(matrix_arg) # same shape as X
@@ -363,21 +369,22 @@ class full_loss(rr.smooth_atom):
         # diagonal blocks to have np.inf
         # weight, these parameters will be zero
         # so column j of eta above is really only summing over k != j
-        scale_grad_idx = 0
         _f = []
         _g = []
         for _, _, _slice, _loss, _scale_idx in self.desc:
             if _loss is not None:
-                if _scale_idx is not None:
+                if _scale_idx is not None: # continuous variable
                     _scale = scale_arg[_scale_idx]
-                    _fval, _gval = _loss.smooth_objective(np.squeeze(eta[:,_slice]) / 
+                    _eta = np.squeeze(eta[:,_slice])
+                    _fval, _gval = _loss.smooth_objective(_eta / 
                                                           _scale, 'both')
-                    scale_grad[scale_grad_idx] = 0.5 * (- nobs / _scale) + _fval
+                    scale_grad[_scale_idx] = 0.5 * ((- nobs / _scale) + 
+                                                        self.sum_sq[_scale_idx] -
+                                                        1. / _scale**2 * (_eta**2).sum())
                     _fval *= _scale
                     _fval += -nobs * 0.5 * np.log(_scale)
-                    scale_grad_idx += 1
                 else:
-                    _fval, _gval = _loss.smooth_objective(np.squeeze(eta[:,_slice]), 
+                    _fval, _gval = _loss.smooth_objective(eta[:,_slice], 
                                                           'both')
                 _f.append(_fval)
                 _g.append(_reshape(_gval))
@@ -427,7 +434,7 @@ $$
 R, C = np.zeros((2, X.shape[1], X.shape[1]), np.int)
 var_names = list(D.columns) + ['intercept']
 
-for l, r in product(desc3, desc3):
+for l, r in product(desc2, desc2):
     l_slice = l[2]
     r_slice = r[2]
     R[l_slice][:,r_slice] = R[r_slice][:,l_slice] = var_names.index(r[0])
@@ -437,7 +444,7 @@ I.shape
 ```
 
 ```{python}
-B2_slice, M1_slice = desc3[1][2], desc3[2][2]
+B2_slice, M1_slice = desc2[1][2], desc2[2][2]
 B2_slice, M1_slice
 ```
 
@@ -457,7 +464,7 @@ len(groups), groups[:40]
 ```{python}
 weights = {}
 covs = {}
-for d in desc3:
+for d in desc2:
     X_ = X[:,d[2]] * 1.
     X_ = X_ - X_.mean(0)
     C_ = X_.T.dot(X_) / X_.shape[0]
@@ -490,16 +497,21 @@ X[:,0][:10]
 ```
 
 ```{python}
+problem.coefs[:] = 0
 problem.coefs[-8:] = 1.
 ```
 
 ```{python}
-soln = problem.solve(start_step=1e-10, debug=True, min_its=50)
+soln = problem.solve(start_step=1/X.shape[0], min_its=50, debug=True)
 ```
 
 ```{python}
 loss.smooth_objective(problem.coefs, 'grad')
 problem.coefs[-8:]
+```
+
+```{python}
+loss.sum_sq
 ```
 
 ```{python}
@@ -509,7 +521,9 @@ plt.plot(problem.solver_results)
 
 ```{python}
 matrix_soln = problem.coefs[loss.matrix_slice].reshape((X.shape[1], X.shape[1]))
+matrix_soln = matrix_soln[1:][:,1:]
 plt.imshow(matrix_soln != 0)
+matrix_soln = np.sign(matrix_soln) * np.log(np.fabs(matrix_soln)+1)
 plt.colorbar()
 ```
 
@@ -519,10 +533,10 @@ ax = plt.gca()
 ax.imshow(matrix_soln, cmap='RdBu', interpolation='nearest', vmin=-np.fabs(matrix_soln).max(),
          vmax=np.fabs(matrix_soln).max())
 ylim, xlim = ax.get_ylim(), ax.get_xlim()
-ax.xaxis.set_ticks(np.cumsum([X[:,d[2]].shape[1] for d in desc3]) - 0.5)
-ax.yaxis.set_ticks(np.cumsum([X[:,d[2]].shape[1] for d in desc3]) - 0.5)
-ax.set_xticklabels([d[0] for d in desc3], rotation=270)
-ax.set_yticklabels([d[0] for d in desc3])
+ax.xaxis.set_ticks(np.cumsum([X[:,d[2]].shape[1] for d in desc2[1:]]) - 0.5)
+ax.yaxis.set_ticks(np.cumsum([X[:,d[2]].shape[1] for d in desc2[1:]]) - 0.5)
+ax.set_xticklabels([d[0] for d in desc2[1:]], rotation=270)
+ax.set_yticklabels([d[0] for d in desc2[1:]])
 ax.grid(color='gray', linewidth=1, linestyle='--')
 f
 ```
@@ -533,7 +547,7 @@ matrix_soln.min()
 
 ```{python}
 group_keys = sorted(weights.keys())
-group_img = np.array([group_keys.index(g) for g in groups]).reshape((X.shape[1], X.shape[1]))
+group_img = np.array([group_keys.index(g) for g in groups])[loss.matrix_slice].reshape((X.shape[1], X.shape[1]))
 ```
 
 ```{python}
@@ -571,18 +585,23 @@ class sklearn_mixed(sklearn_regression):
                  offset=False,
                  coef=1., 
                  quadratic=None,
-                 score_method='deviance'):
+                 score_method='deviance',
+                 solve_args={},
+                 initial=None):
         
         self.desc = desc
+        self.initial = initial
         sklearn_regression.__init__(self,
                                     atom_constructor,
                                     atom_params,
                                     case_weights=case_weights,
                                     offset=offset,
                                     coef=coef,
-                                    score_method=score_method)
-
-
+                                    score_method=score_method,
+                                    solve_args=solve_args,
+                                    initial=initial)
+        self.solve_args = solve_args
+        
     def _loglike_factory(self, X, y):
         loss = full_loss(X, self.desc)
         return loss
@@ -603,34 +622,33 @@ class sklearn_mixed(sklearn_regression):
             return np.mean(loss(predictions))
         else:
             return np.nan
-```
-
-```{python}
-X_sub = X[np.random.choice(np.arange(X.shape[0]), 10000, replace=False)]
-desc4 = []
-for var, dtype, idx in desc2:
-    if dtype in ['binary', 'categorical']:
-        response = X_sub[:,idx]
-        desc4.append((var, dtype, idx,
-                         multinomial_loglike(response.shape,
-                                             response)))
-    elif dtype == 'continuous':
-        response = np.squeeze(X_sub[:,idx]) # it will be a 2D array
-        if var not in ['snr', 'w_surface_window_final', 'intercept']:
-            l, u = np.percentile(response, [5, 95]) # quick and dirty cleaning..
-            response = np.clip(response, l, u)
-        elif var == 'w_surface_window_final':
-            l, u = np.percentile(response, [2, 98]) # quick and dirty cleaning..
-            response = np.clip(response, l, u)
-        response /= np.std(response)
-        X_sub[:,idx] = response[:,None]
         
-        desc4.append((var, dtype, idx,
-                         gaussian_loglike(response.shape,
-                                          response)))
-    else:
-        desc4.append((var, dtype, idx, None))
+    def score(self, X, y, sample_weight=None):
+        '''
+        Parameters
+        ----------
+        X : array-like, shape = (n_samples, n_features)
+            Test samples.
 
+        y : array-like, shape = (n_samples) or (n_samples, n_outputs)
+            True values for X.
+
+        sample_weight : array-like, shape = [n_samples], optional
+            Sample weights.
+
+        Returns
+        -------
+        score : float
+        '''
+        return np.random.standard_normal() ### fix this!!!
+        predictions = X.dot(self._coefs)
+        if offset is not None:
+            predictions -= offset   # this is how offsets are incorporated
+                                    # in regreg
+        if sample_weight is not None:
+            if case_weights is not None:
+                case_weights *= sample_weight
+        return self._saturated_score(predictions, response, case_weights=case_weights)
 ```
 
 ```{python}
@@ -638,13 +656,16 @@ from sklearn.model_selection import cross_validate
 sklearn_loss = sklearn_mixed(rr.group_lasso,
                              {'groups':groups,
                               'weights':weights,
-                              'lagrange':0. * np.sqrt(X_sub.shape[0])},
-                            desc3)
-cross_validate(sklearn_loss, X_sub, None, cv=5)
+                              'lagrange':10 * np.sqrt(X.shape[0])},
+                             desc2,
+                             solve_args={'start_step':1/X.shape[0], 'debug':True},                             
+                             initial=problem.coefs.copy())                                    
+
+sklearn_loss.fit(X, None)
 ```
 
 ```{python}
-# cross_validate?
+cross_validate(sklearn_loss, X, np.ones(X.shape[0]), cv=3)
 ```
 
 ```{python}

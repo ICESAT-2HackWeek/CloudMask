@@ -64,7 +64,7 @@ $$
 \Theta \mapsto \sum_{j=1}^p \ell_j(\Theta; X[:,j] | X[:,k], k \neq j).
 $$
 
-The penalized *pseudolikelihood$ is 
+The penalized *pseudolikelihood* is 
 $$
 \Theta \mapsto \left[\sum_{j=1}^p \ell_j(\Theta; X[:,j] | X[:,k], k \neq j)\right] + {\cal P}(\Theta).
 $$
@@ -74,15 +74,53 @@ This is an objective we can minimize as a function of $\Theta$. For large enough
 
 ### Special case: all continuous
 
-When each feature is continuous, a common model for the distribution would be Gaussian. This can be parameterized in terms of sufficient statistics $X$ and $XX^T$ with natural parameters $\alpha$ and $\Theta$, say. So, the density can be written as
-$$
-P_{\alpha,\Theta}(X_i=x) \propto \exp \left(\alpha^Tx - \frac{1}{2} \text{Tr}(\Theta xx^T) \right).
-$$
-This is of course the normal family but parametrized slightly differently.
+When each feature is continuous, a common model for the distribution
+would be Gaussian. This can be parameterized in terms of sufficient
+statistics $X$ and $XX^T$ with natural parameters $\alpha$ and
+$\Theta$, say. So, the density can be written as $$
+P_{\alpha,\Theta}(X_i=x) \propto \exp \left(\alpha^Tx +
+\text{Tr}(\Theta xx^T) \right).$$ 
+This is of course the normal
+family but parametrized slightly differently.
 
-This is quite similar to the binary case (in the binary case we could suck the $\alpha$ into the diagonal of $\Theta$ but this doesn't work in the Gaussian case.
+This is quite similar to the binary case (in the binary case we could
+suck the $\alpha$ into the diagonal of $\Theta$) but this doesn't work in the Gaussian case.
 
-In this case, for one of the columns $X[:,j]$ there is a pseudo-likelihood corresponding to predicting $X[:,j]$ as a function of $X[:,k], k \neq j$. Each term in the this pseudo-likelihood looks like a linear regression loss function. Summing these terms gives a pseudo-likelihood that could be used to fit the *graphical LASSO* (e.g. `glasso` in `R`).
+In this case, for one of the columns $X[:,j]$ there is a
+pseudo-likelihood corresponding to predicting $X[:,j]$ as a function
+of $X[:,k], k \neq j$. Each term in the this pseudo-likelihood looks
+like a linear regression loss function. Summing these terms gives a
+pseudo-likelihood that could be used to fit the *graphical LASSO*
+(e.g. `glasso` in `R`).
+
+For Gaussians we need to introduce a separate scale parameter in the optimization.
+Call these $\alpha$. Enforcing each $\Theta[j,j]$ block to be 0, our $j$-th pseudolikelihood
+for a Gaussian is a normalized version of the density
+$$
+x_j \mapsto \exp\left(x_j \cdot \left(\sum_{k:k \neq j} \Theta[k,j] x_k\right) - \alpha_j x_j^2 \right). 
+$$
+The normalizing constant is
+$$
+\sqrt{2 \pi /\alpha_j} \exp\left( \frac{1}{2 \alpha_j} (\Theta[j]^Tx)^2 \right)
+$$
+so the likelihood for a continuous feature is
+$$
+(\Theta[j], \alpha_j) \mapsto \frac{1}{\sqrt{2\pi/\alpha_j}} \exp\left(-\frac{\alpha_j}{2} (\Theta[j]x - x_j)^2 \right)
+$$
+where we have used the convention that $\Theta[j,j]=0$.
+
+Taking negative logs yields
+$$
+(\Theta[j], \alpha_j) \mapsto - \frac{1}{2}\log(\alpha_j) + \frac{\alpha_j}{2}(\Theta[j]x-x_j)^2
+$$
+
+Stacking rows and summing yields
+$$
+(\Theta[j], \alpha_j) \mapsto - \frac{n}{2}\log(\alpha_j) + \frac{\alpha_j}{2}\|\eta_j-X[:,j]\|^2_2
+$$
+with $\eta_j = X\Theta[:,j]$.            
+
+In fact, fixing $\Theta$, we could solve for $\alpha_j$ but this seems messy.
 
 
 ### Putting these together
@@ -97,8 +135,6 @@ We now have a symmetric $p \times p$ *matrix* $\Theta$ (it's not really a matrix
 multinomial regression (the analog of logistic for categorical) of $X[:,j]$ on to $X[:,k]$ then there would be a $3 \times 5$ matrix of parameters in that model. (Note that much software often will set some of these to 0 automatically for identification reasons -- in this model with the penalty it is common not to do this). Anyways, we see that $\Theta_{jk}$ is really in $\mathbb{R}^{3 \times 5}$ and $\Theta_{kj} = \Theta_{jk}^T \in \mathbb{R}^{5 \times 3}$.
 
 The (or, an) analog of the $\ell_1$ penalty for the *matrix* $\Theta_{jk}$ is the Frobenius norm -- this is what the authors propose.
-
-
 
 
 ### Relation to separate regressions
@@ -214,6 +250,7 @@ np.percentile(D['w_surface_window_final'], [2,98])
 
 ```{python}
 X, desc2 = make_design(D, desc)
+#X = X[np.random.choice(np.arange(X.shape[0]), 50000, replace=False)]
 desc2
 np.unique(D['snr']), np.unique(D['h_rb'])
 ```
@@ -227,42 +264,16 @@ np.unique(D['snr']), np.unique(D['h_rb'])
 This will use the `regreg` package: `http://github.com/jonathan-taylor/regreg.git`
 
 For `binary` or `categorical` we will use multinomial loss, while for `continuous`
-we will use Gaussian loss (i.e. squared error). We probably want to rescale each loss a little based on the variability under the *null* model.
+we will use the special Gaussian loss described above.
 
 ```{python}
 from regreg.smooth.mglm import multinomial_loglike
 from regreg.smooth.glm import gaussian_loglike
-import regreg.api as rr
-
-desc3 = []
-for var, dtype, idx in desc2:
-    if dtype in ['binary', 'categorical']:
-        response = X[:,idx]
-        desc3.append((var, dtype, idx,
-                         multinomial_loglike(response.shape,
-                                             response)))
-    elif dtype == 'continuous':
-        response = np.squeeze(X[:,idx]) # it will be a 2D array
-        if var not in ['snr', 'w_surface_window_final']:
-            l, u = np.percentile(response, [5, 95]) # quick and dirty cleaning..
-            response = np.clip(response, l, u)
-        elif var == 'w_surface_window_final':
-            l, u = np.percentile(response, [2, 98]) # quick and dirty cleaning..
-            response = np.clip(response, l, u)
-        response /= np.std(response)
-        X[:,idx] = response[:,None]
-        
-        desc3.append((var, dtype, idx,
-                         gaussian_loglike(response.shape,
-                                          response)))
-    else:
-        desc3.append((var, dtype, idx, None))
-
-desc3[-1]
+import regreg.api as rr        
 ```
 
 ```{python}
-np.isnan(X[:,4]).sum(), X.std(0)
+np.isnan(X[:,4]).sum(), X.std(0), X[:,0][:10]
 ```
 
 ### Combine losses into a smooth objective function
@@ -272,6 +283,12 @@ def _reshape(G):
     if G.ndim == 1:
         return G.reshape((-1, 1))
     return G
+
+class gaussian_loss(rr.smooth_atom):
+
+    """
+    This codes up (11) of Lee and Hastie
+    """
 
 class full_loss(rr.smooth_atom):
     
@@ -286,61 +303,117 @@ class full_loss(rr.smooth_atom):
                  initial=None):
         
         (self.X, 
-         self.desc,
-         self.symmetrize) = (X, desc, symmetrize)
+         self.symmetrize) = (X.copy(), symmetrize)
+
+        # create individual losses
+        # categorical / binary
+        # are multinomial
+
+        # continuous ones get a special loss
+        # with unknown covariance
+        
+        idx_cont = 0
+        self.desc = []
+        self.sum_sq = []
+        for var, dtype, idx in desc:
+            if dtype in ['binary', 'categorical']:
+                response = self.X[:,idx]
+                self.desc.append((var, dtype, idx,
+                                  multinomial_loglike(response.shape,
+                                                      response), 
+                                  None))
+            elif dtype == 'continuous':
+                response = np.squeeze(self.X[:,idx]) # it will be a 2D array
+                if var not in ['snr', 'w_surface_window_final', 'intercept']:
+                    l, u = np.percentile(response, [5, 95]) # quick and dirty cleaning..
+                    response = np.clip(response, l, u)
+                elif var == 'w_surface_window_final':
+                    l, u = np.percentile(response, [2, 98]) # quick and dirty cleaning..
+                    response = np.clip(response, l, u)
+                response -= np.mean(response)
+                response /= np.std(response)
+                self.X[:,idx] = response[:,None]
+                self.sum_sq.append((response**2).sum())
+                self.desc.append((var, dtype, idx,
+                                  gaussian_loglike(response.shape,
+                                                   response),
+                                  idx_cont))
+                idx_cont += 1
+            else:
+                self.desc.append((var, dtype, idx, None, None))
 
         rr.smooth_atom.__init__(self,
-                                shape=(X.shape[1]**2),
+                                shape=(X.shape[1]**2 + idx_cont),
                                 coef=coef,
                                 offset=offset,
                                 quadratic=quadratic,
                                 initial=initial)
         
+        self.matrix_slice = slice(0, X.shape[1]**2, None)
+        self.scale_slice = slice(X.shape[1]**2, X.shape[1]**2 + idx_cont, None)
+        self.sum_sq = np.array(self.sum_sq)
         self._grad_buff = np.zeros((X.shape[1], 
                                     X.shape[1]))
         
     def smooth_objective(self, arg, mode='both', check_feasibility=False):
         
         arg = self.apply_offset(arg)
-        matrix_arg = arg.reshape((self._grad_buff.shape))
-        
-        eta = natural_param = self.X.dot(matrix_arg) # again of shape as X
+        matrix_arg = arg[self.matrix_slice].reshape((self._grad_buff.shape))
+        scale_arg = arg[self.scale_slice]
+        scale_arg = np.maximum(scale_arg, 1.e-14)
+        scale_grad = np.zeros_like(scale_arg)
+        full_grad = np.zeros(self.shape)
+        eta = natural_param = self.X.dot(matrix_arg) # same shape as X
+        nobs = eta.shape[0]
+        # because we will force
+        # diagonal blocks to have np.inf
+        # weight, these parameters will be zero
+        # so column j of eta above is really only summing over k != j
+        _f = []
+        _g = []
+        for _, _, _slice, _loss, _scale_idx in self.desc:
+            if _loss is not None:
+                if _scale_idx is not None: # continuous variable
+                    _scale = scale_arg[_scale_idx]
+                    _eta = np.squeeze(eta[:,_slice])
+                    _fval, _gval = _loss.smooth_objective(_eta / 
+                                                          _scale, 'both')
+                    scale_grad[_scale_idx] = 0.5 * ((- nobs / _scale) + 
+                                                        self.sum_sq[_scale_idx] -
+                                                        1. / _scale**2 * (_eta**2).sum())
+                    _fval *= _scale
+                    _fval += -nobs * 0.5 * np.log(_scale)
+                else:
+                    _fval, _gval = _loss.smooth_objective(eta[:,_slice], 
+                                                          'both')
+                _f.append(_fval)
+                _g.append(_reshape(_gval))
         
         if mode == 'func':
-            _f = [_loss.smooth_objective(np.squeeze(eta[:,_slice]), 'func') 
-                  for _, _, _slice, _loss in self.desc if _loss is not None]
             return self.scale(np.sum(_f))
         elif mode == 'grad':
-            _g = [_reshape(_loss.smooth_objective(np.squeeze(eta[:,_slice]), 
-                                                  'grad')) 
-                  for _, _, _slice, _loss in self.desc if _loss is not None]
             self._grad_buff[:,1:] = self.scale(self.X.T.dot(np.hstack(_g)))
             self._grad_buff[:,0] = 0
             if self.symmetrize:
-                return 0.5 * (self._grad_buff + self._grad_buff.T).reshape(-1)
-            else:
-                return self._grad_buff.copy()
+                self._grad_buff = 0.5 * (self._grad_buff + self._grad_buff.T)
+            full_grad[self.matrix_slice] = self._grad_buff.reshape(-1)
+            full_grad[self.scale_slice] = self.scale(scale_grad)
+            return full_grad
         elif mode == 'both':
-            _f = [_loss.smooth_objective(np.squeeze(eta[:,_slice]), 'func') 
-                  for _, _, _slice, _loss in self.desc if _loss is not None]
-            _g = [_reshape(_loss.smooth_objective(np.squeeze(eta[:,_slice]), 
-                                                  'grad'))
-                  for _, _, _slice, _loss in self.desc if _loss is not None]
             self._grad_buff[:,1:] = self.scale(self.X.T.dot(np.hstack(_g)))
             self._grad_buff[:,0] = 0
             if self.symmetrize:
-                return (self.scale(np.sum(_f)), 
-                        0.5 * (self._grad_buff + self._grad_buff.T).reshape(-1))
-            else:
-                return (self.scale(np.sum(_f)), 
-                        self._grad_buff.copy())
+                self._grad_buff = 0.5 * (self._grad_buff + self._grad_buff.T)
+            full_grad[self.matrix_slice] = self._grad_buff.reshape(-1)
+            full_grad[self.scale_slice] = self.scale(scale_grad)
+            return self.scale(np.sum(_f)), full_grad
 ```
 
 ```{python}
-loss = full_loss(X, desc3)
+loss = full_loss(X, desc2)
 F, G = loss.smooth_objective(np.zeros(loss.shape), 'both')
 G.shape
-X.std(0)
+X.std(0), loss.shape
 ```
 
 ### Construct penalty
@@ -361,7 +434,7 @@ $$
 R, C = np.zeros((2, X.shape[1], X.shape[1]), np.int)
 var_names = list(D.columns) + ['intercept']
 
-for l, r in product(desc3, desc3):
+for l, r in product(desc2, desc2):
     l_slice = l[2]
     r_slice = r[2]
     R[l_slice][:,r_slice] = R[r_slice][:,l_slice] = var_names.index(r[0])
@@ -371,7 +444,7 @@ I.shape
 ```
 
 ```{python}
-B2_slice, M1_slice = desc3[1][2], desc3[2][2]
+B2_slice, M1_slice = desc2[1][2], desc2[2][2]
 B2_slice, M1_slice
 ```
 
@@ -391,9 +464,9 @@ len(groups), groups[:40]
 ```{python}
 weights = {}
 covs = {}
-for d in desc3:
-    X_ = X[:,d[2]]
-    X_ -= X_.mean(0)
+for d in desc2:
+    X_ = X[:,d[2]] * 1.
+    X_ = X_ - X_.mean(0)
     C_ = X_.T.dot(X_) / X_.shape[0]
     covs[d[0]] = np.diag(C_).sum()
     
@@ -401,61 +474,80 @@ for l, r in product(covs.keys(), covs.keys()):
     weights['-'.join(sorted([l, r]))] = np.sqrt(covs[l] * covs[r])
     if l == r:
         weights['-'.join([l, r])] = np.inf
+for d in loss.desc:
+    if d[1] == 'continuous':
+        weights[d[0]+'-scale'] = 0
+        groups.append(d[0]+'-scale')
+weights
 ```
 
 ```{python}
-penalty = rr.group_lasso(list(groups), weights=weights, lagrange=5 * np.sqrt(X.shape[0]))
+penalty = rr.group_lasso(list(groups), weights=weights, lagrange=10 * np.sqrt(X.shape[0]))
 penalty.shape
-penalty
-```
-
-```{python}
-loss
 ```
 
 ```{python}
 problem = rr.simple_problem(loss, penalty)
-problem
+
 ```
 
 ```{python}
-soln = problem.solve(max_its=10)
+loss.smooth_objective(problem.coefs, 'grad')
+X[:,0][:10]
 ```
 
 ```{python}
-soln = problem.solve(start_step=1e-4, debug=True)
+problem.coefs[:] = 0
+problem.coefs[-8:] = 1.
 ```
 
 ```{python}
-soln = _329
+soln = problem.solve(start_step=1/X.shape[0], min_its=50, debug=True)
 ```
 
 ```{python}
-matrix_soln = soln.reshape((X.shape[1], X.shape[1]))
+loss.smooth_objective(problem.coefs, 'grad')
+problem.coefs[-8:]
+```
+
+```{python}
+loss.sum_sq
+```
+
+```{python}
+problem.coefs[loss.matrix_slice].reshape((X.shape[1], X.shape[1]))[0]
+plt.plot(problem.solver_results)
+```
+
+```{python}
+matrix_soln = problem.coefs[loss.matrix_slice].reshape((X.shape[1], X.shape[1]))
+matrix_soln = matrix_soln[1:][:,1:]
 plt.imshow(matrix_soln != 0)
+matrix_soln = np.sign(matrix_soln) * np.log(np.fabs(matrix_soln)+1)
 plt.colorbar()
 ```
 
 ```{python}
 f = plt.figure(figsize=(8,8))
 ax = plt.gca()
-ax.imshow(matrix_soln, cmap='RdBu', interpolation='nearest', vmin=-10, vmax=10)
+ax.imshow(matrix_soln, cmap='RdBu', interpolation='nearest', vmin=-np.fabs(matrix_soln).max(),
+         vmax=np.fabs(matrix_soln).max())
 ylim, xlim = ax.get_ylim(), ax.get_xlim()
-ax.xaxis.set_ticks(np.cumsum([X[:,d[2]].shape[1] for d in desc3]) - 0.5)
-ax.yaxis.set_ticks(np.cumsum([X[:,d[2]].shape[1] for d in desc3]) - 0.5)
-ax.set_xticklabels([d[0] for d in desc3], rotation=270)
-ax.set_yticklabels([d[0] for d in desc3])
+ax.xaxis.set_ticks(np.cumsum([X[:,d[2]].shape[1] for d in desc2[1:]]) - 0.5)
+ax.yaxis.set_ticks(np.cumsum([X[:,d[2]].shape[1] for d in desc2[1:]]) - 0.5)
+ax.set_xticklabels([d[0] for d in desc2[1:]], rotation=270)
+ax.set_yticklabels([d[0] for d in desc2[1:]])
 ax.grid(color='gray', linewidth=1, linestyle='--')
 f
 ```
 
 ```{python}
-desc3
+matrix_soln.min()
 ```
 
 ```{python}
 group_keys = sorted(weights.keys())
-group_img = np.array([group_keys.index(g) for g in groups]).reshape((X.shape[1], X.shape[1]))
+group_img = np.array([group_keys.index(g) for g in groups])[loss.matrix_slice].reshape((X.shape[1], X.shape[1]))
 ```
 
 ```{python}
@@ -471,16 +563,109 @@ np.unique(group_img).shape
 len(group_keys)
 ```
 
+## Regular markdown
+
 ```{python}
-# problem.solve??
+from regreg.sklearn.base import sklearn_regression
+
+class sklearn_mixed(sklearn_regression):
+
+    """
+
+    A simple regression mixin for sklearn
+    that allows any atom to be used as a regularizer.
+
+    """
+
+    def __init__(self, 
+                 atom_constructor, 
+                 atom_params, 
+                 desc,
+                 case_weights=False,
+                 offset=False,
+                 coef=1., 
+                 quadratic=None,
+                 score_method='deviance',
+                 solve_args={},
+                 initial=None):
+        
+        self.desc = desc
+        self.initial = initial
+        sklearn_regression.__init__(self,
+                                    atom_constructor,
+                                    atom_params,
+                                    case_weights=case_weights,
+                                    offset=offset,
+                                    coef=coef,
+                                    score_method=score_method,
+                                    solve_args=solve_args,
+                                    initial=initial)
+        self.solve_args = solve_args
+        
+    def _loglike_factory(self, X, y):
+        loss = full_loss(X, self.desc)
+        return loss
+
+    def _saturated_score(self,
+                         predictions,
+                         response,
+                         case_weights=None):
+
+        # XXX fix these scores!!!
+        if self.score_method == 'deviance':
+            return np.random.standard_normal()
+        elif self.score_method == 'mean_deviance':
+            return np.random.standard_normal()
+        elif self.score_method == 'R2':
+            SSE = np.sum(loss(predictions))
+            SST = np.sum(loss(response.mean() * np.ones_like(response)))
+            return np.mean(loss(predictions))
+        else:
+            return np.nan
+        
+    def score(self, X, y, sample_weight=None):
+        '''
+        Parameters
+        ----------
+        X : array-like, shape = (n_samples, n_features)
+            Test samples.
+
+        y : array-like, shape = (n_samples) or (n_samples, n_outputs)
+            True values for X.
+
+        sample_weight : array-like, shape = [n_samples], optional
+            Sample weights.
+
+        Returns
+        -------
+        score : float
+        '''
+        return np.random.standard_normal() ### fix this!!!
+        predictions = X.dot(self._coefs)
+        if offset is not None:
+            predictions -= offset   # this is how offsets are incorporated
+                                    # in regreg
+        if sample_weight is not None:
+            if case_weights is not None:
+                case_weights *= sample_weight
+        return self._saturated_score(predictions, response, case_weights=case_weights)
 ```
 
 ```{python}
-# rr.FISTA.fit??
+from sklearn.model_selection import cross_validate
+sklearn_loss = sklearn_mixed(rr.group_lasso,
+                             {'groups':groups,
+                              'weights':weights,
+                              'lagrange':10 * np.sqrt(X.shape[0])},
+                             desc2,
+                             solve_args={'start_step':1/X.shape[0], 'debug':True},                             
+                             initial=problem.coefs.copy())                                    
+
+sklearn_loss.fit(X, None)
 ```
 
 ```{python}
-# plt.imshow?
+cross_validate(sklearn_loss, X, np.ones(X.shape[0]), cv=3)
 ```
 
 ```{python}

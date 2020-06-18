@@ -157,16 +157,16 @@ from itertools import product
 import matplotlib.pyplot as plt
 # %matplotlib inline
 
-D = pd.DataFrame({'B1': np.random.choice([0,1], size=50000),
-                  'B2': np.random.choice([0,1], size=50000),
-                  'M1': np.random.choice(list('abcd'), size=50000),
-                  'M2': np.random.choice(list('defgh'), size=50000),
-                  'C1': np.random.standard_normal(50000),
-                  'C2': np.random.standard_normal(50000)})
+
+D = pd.read_csv('atl06.csv') # .iloc[:5000]
+D = D.dropna()
+del(D['Unnamed: 0'])
+D.columns, D.shape
 ```
 
 ```{python}
-def make_onehot(categorical_col):
+def make_onehot(categorical_col):  #TODO: would be more robust to know labels beforehand
+                                   # e.g. for cross-validation
     labels = sorted(np.unique(categorical_col))
     return np.equal.outer(np.asarray(categorical_col), labels)
 
@@ -185,27 +185,41 @@ def make_design(df, desc):
             new_desc.append((col, dtype, slice(idx, idx+1)))
             design_col = np.asarray(df[col].copy())
             # should we standardize?
-            design_col -= design_col.mean()
-            design_col /= design_col.std()
             design_col.shape = (-1,1)
             design.append(design_col)
             idx += 1
     return np.hstack(design), new_desc
 
-desc =  [('B1','binary'),
-         ('B2','binary'),
-         ('M1','categorical'),
-         ('M2','categorical'),
-         ('C1','continuous'),
-         ('C2','continuous')]
-
-X, desc = make_design(D, desc)
+desc = [('s_li', 'continuous'),
+        ('q_flag', 'binary'),
+        ('snr', 'continuous'),
+        ('h_rb', 'continuous'),
+        ('dh_fit_dx', 'continuous'),
+        ('b_snow_conf', 'categorical'),
+        ('c_flg_asr', 'categorical'),
+        ('c_flg_atm', 'categorical'),
+        ('msw', 'categorical' ),
+        #('bsnow_h', 'continuous'),
+        #('bsnow_od', 'continuous'),
+        ('layer_flag', 'binary'),
+        ('bckgrd', 'continuous'),
+        ('e_bckgrd', 'continuous'),
+        ('n_fit_photons', 'continuous'),
+        ('w_surface_window_final', 'continuous')]
 desc
-
+(np.mean(D['bsnow_od'] == D['bsnow_od'].max()), 
+ np.mean(D['bsnow_h'] == D['bsnow_h'].max()))
+np.percentile(D['w_surface_window_final'], [2,98])
 ```
 
 ```{python}
-X[:,5:9][:10]
+X, desc2 = make_design(D, desc)
+desc2
+np.unique(D['snr']), np.unique(D['h_rb'])
+```
+
+```{python}
+[(len(np.unique(D[c])), t) for c, t, _ in desc2[1:]]
 ```
 
 ### Form saturated losses 
@@ -220,22 +234,35 @@ from regreg.smooth.mglm import multinomial_loglike
 from regreg.smooth.glm import gaussian_loglike
 import regreg.api as rr
 
-new_desc = []
-for var, dtype, idx in desc:
+desc3 = []
+for var, dtype, idx in desc2:
     if dtype in ['binary', 'categorical']:
         response = X[:,idx]
-        new_desc.append((var, dtype, idx,
+        desc3.append((var, dtype, idx,
                          multinomial_loglike(response.shape,
                                              response)))
     elif dtype == 'continuous':
         response = np.squeeze(X[:,idx]) # it will be a 2D array
-        new_desc.append((var, dtype, idx,
+        if var not in ['snr', 'w_surface_window_final']:
+            l, u = np.percentile(response, [5, 95]) # quick and dirty cleaning..
+            response = np.clip(response, l, u)
+        elif var == 'w_surface_window_final':
+            l, u = np.percentile(response, [2, 98]) # quick and dirty cleaning..
+            response = np.clip(response, l, u)
+        response /= np.std(response)
+        X[:,idx] = response[:,None]
+        
+        desc3.append((var, dtype, idx,
                          gaussian_loglike(response.shape,
                                           response)))
     else:
-        new_desc.append((var, dtype, idx, None))
-desc = new_desc
-desc[-1]
+        desc3.append((var, dtype, idx, None))
+
+desc3[-1]
+```
+
+```{python}
+np.isnan(X[:,4]).sum(), X.std(0)
 ```
 
 ### Combine losses into a smooth objective function
@@ -310,9 +337,10 @@ class full_loss(rr.smooth_atom):
 ```
 
 ```{python}
-loss = full_loss(X, desc)
+loss = full_loss(X, desc3)
 F, G = loss.smooth_objective(np.zeros(loss.shape), 'both')
-G.shape           
+G.shape
+X.std(0)
 ```
 
 ### Construct penalty
@@ -333,7 +361,7 @@ $$
 R, C = np.zeros((2, X.shape[1], X.shape[1]), np.int)
 var_names = list(D.columns) + ['intercept']
 
-for l, r in product(desc, desc):
+for l, r in product(desc3, desc3):
     l_slice = l[2]
     r_slice = r[2]
     R[l_slice][:,r_slice] = R[r_slice][:,l_slice] = var_names.index(r[0])
@@ -343,7 +371,7 @@ I.shape
 ```
 
 ```{python}
-B2_slice, M1_slice = desc[1][2], desc[2][2]
+B2_slice, M1_slice = desc3[1][2], desc3[2][2]
 B2_slice, M1_slice
 ```
 
@@ -362,12 +390,15 @@ len(groups), groups[:40]
 
 ```{python}
 weights = {}
-ncol = {}
-for d in desc:
-    ncol[d[0]] = X[:,d[2]].shape[1]
+covs = {}
+for d in desc3:
+    X_ = X[:,d[2]]
+    X_ -= X_.mean(0)
+    C_ = X_.T.dot(X_) / X_.shape[0]
+    covs[d[0]] = np.diag(C_).sum()
     
-for l, r in product(ncol.keys(), ncol.keys()):
-    weights['-'.join(sorted([l, r]))] = np.sqrt(ncol[l] * ncol[r])
+for l, r in product(covs.keys(), covs.keys()):
+    weights['-'.join(sorted([l, r]))] = np.sqrt(covs[l] * covs[r])
     if l == r:
         weights['-'.join([l, r])] = np.inf
 ```
@@ -388,8 +419,15 @@ problem
 ```
 
 ```{python}
-# %%timeit 
-soln = problem.solve(min_its=100)
+soln = problem.solve(max_its=10)
+```
+
+```{python}
+soln = problem.solve(start_step=1e-4, debug=True)
+```
+
+```{python}
+soln = _329
 ```
 
 ```{python}
@@ -399,7 +437,20 @@ plt.colorbar()
 ```
 
 ```{python}
-penalty.weights
+f = plt.figure(figsize=(8,8))
+ax = plt.gca()
+ax.imshow(matrix_soln, cmap='RdBu', interpolation='nearest', vmin=-10, vmax=10)
+ylim, xlim = ax.get_ylim(), ax.get_xlim()
+ax.xaxis.set_ticks(np.cumsum([X[:,d[2]].shape[1] for d in desc3]) - 0.5)
+ax.yaxis.set_ticks(np.cumsum([X[:,d[2]].shape[1] for d in desc3]) - 0.5)
+ax.set_xticklabels([d[0] for d in desc3], rotation=270)
+ax.set_yticklabels([d[0] for d in desc3])
+ax.grid(color='gray', linewidth=1, linestyle='--')
+f
+```
+
+```{python}
+desc3
 ```
 
 ```{python}
@@ -418,6 +469,18 @@ np.unique(group_img).shape
 
 ```{python}
 len(group_keys)
+```
+
+```{python}
+# problem.solve??
+```
+
+```{python}
+# rr.FISTA.fit??
+```
+
+```{python}
+# plt.imshow?
 ```
 
 ```{python}

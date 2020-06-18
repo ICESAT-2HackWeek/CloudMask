@@ -1,0 +1,488 @@
+---
+jupyter:
+  jupytext:
+    formats: ipynb,Rmd
+    text_representation:
+      extension: .Rmd
+      format_name: rmarkdown
+      format_version: '1.2'
+      jupytext_version: 1.5.0
+  kernelspec:
+    display_name: Python 3
+    language: python
+    name: python3
+---
+
+## Overview of model
+
+The model we'll start with is based on [Hastie and Lee](https://web.stanford.edu/~hastie/Papers/structmgm.pdf). It fits a certain type of 
+*undirected* graphical model to a sample of random variables of mixed type (discrete or continuous).
+
+It has the advantage that it also selects which *interactions* amongst the variables seem most relevant.
+
+Our data is
+$$
+X = \begin{pmatrix} X_1 \\ X_2 \\ \vdots \\ X_n
+\end{pmatrix}
+$$
+and each sample $X_i$ is of mixed type -- in `numpy / pandas` terms we can think of it having a `dtype` with some `np.float` fields as well as some `pandas.Categotical` fields.
+We think of having $p$ different variables so we can talk about $X_{ij}, 1 \leq i \leq n, 1 \leq j \leq p$.
+
+
+### Special case: binary random variables
+
+In this case $X_i \in \{0,1\}^p$. The model here is a generalization of the Ising model. That is, each row is like a realization of an Ising model so we have a sample of realizations of Ising models.
+
+The model is parameterized here by a $p \times p$ symmetric matrix $\Sigma$
+and
+$$
+P_{\Theta}(X_i=x_i) \propto \exp\left(\sum_{j,k} x_{i,j} x_{i,k} \Theta_{jk} \right).
+$$
+
+Classical Ising models have a fixed graph, say with adjacency matrix $A$ and perhaps two parameters $(\theta_1, \theta_2)$: one for interaction and one affecting the overall mean (external field? not sure, not a physicist). In these models
+$$
+P_{(\theta_1, \theta_2)}(X_i=x) \propto \exp \left(\theta_1 \sum_j x_j + \theta_2 \sum_{j, k} x_j x_k A_{jk}\right)
+$$
+so we can think of this having a $\Theta$ with $\theta_1$ on the diagonal and $\theta_2/2$ off the diagonal.
+
+This model therefore has a parameter for *each edge*. Edges are selected by putting a penalty on each edge, i.e. an $\ell_1$ penalty perhaps leaving the mean terms unpenalized:
+$$
+{\cal P}(\Theta) = \lambda \sum_{(j,k): j \neq k} |\Theta_{jk}|.
+$$
+
+
+### Psuedolikelihood
+
+To fit this model is complicated -- it is expensive to normalize the $\propto$ in the likelihood so people, dating back to Besag in the 80s have used pseudolikelihood as the objective.
+
+This objective is the sum of all the conditional likelihoods for one of the variables given all the others. E.g. in our Ising model here, if we *knew* $\Sigma$ then for any $X_{i,j}$ we know that $X_{i,j}$ is Bernoulli and given $X_{i,k}, k \neq j$ we can work out the probability it is 1 or 0 based on $\Sigma$. This is effectively the likelihood for a logistic regression. There is therefore a likelihood for each column $j$
+$$
+\ell_j(\Theta; X[:,j] | X[:,k], k \neq j)
+$$
+and the pseudo-likelihood (sum of conditional negative log-likelihoods) is
+$$
+\Theta \mapsto \sum_{j=1}^p \ell_j(\Theta; X[:,j] | X[:,k], k \neq j).
+$$
+
+The penalized *pseudolikelihood$ is 
+$$
+\Theta \mapsto \left[\sum_{j=1}^p \ell_j(\Theta; X[:,j] | X[:,k], k \neq j)\right] + {\cal P}(\Theta).
+$$
+
+This is an objective we can minimize as a function of $\Theta$. For large enough values of $\lambda$ the minimize, $\Theta$ will be sparse off-diagonal. This is the *undirected* graph selection.
+
+
+### Special case: all continuous
+
+When each feature is continuous, a common model for the distribution would be Gaussian. This can be parameterized in terms of sufficient statistics $X$ and $XX^T$ with natural parameters $\alpha$ and $\Theta$, say. So, the density can be written as
+$$
+P_{\alpha,\Theta}(X_i=x) \propto \exp \left(\alpha^Tx - \frac{1}{2} \text{Tr}(\Theta xx^T) \right).
+$$
+This is of course the normal family but parametrized slightly differently.
+
+This is quite similar to the binary case (in the binary case we could suck the $\alpha$ into the diagonal of $\Theta$ but this doesn't work in the Gaussian case.
+
+In this case, for one of the columns $X[:,j]$ there is a pseudo-likelihood corresponding to predicting $X[:,j]$ as a function of $X[:,k], k \neq j$. Each term in the this pseudo-likelihood looks like a linear regression loss function. Summing these terms gives a pseudo-likelihood that could be used to fit the *graphical LASSO* (e.g. `glasso` in `R`).
+
+
+### Putting these together
+
+It is now not hard to see how to mix continuous and binary. Each binary `field` has a reference sample space of $\{0,1\}$ while each continuous one has a reference sample space $\mathbb{R}$. Stringing all fields together gives a sample space
+$$
+\{0,1\}^{j:j \in {\cal B}} \times \mathbb{R}^{j: j \in {\cal C}}
+$$
+where ${\cal B}$ are the binary fields in our `dtype` and ${\cal C}$ are the floating type fields in our `dtype`. If we had categorical instead of binary then that field's $\{0,1\}$ would be replaced by $\{1, \dots, N_j\}$ where $N_j$ is the number of categories for field $j$.
+
+We now have a symmetric $p \times p$ *matrix* $\Theta$ (it's not really a matrix) where each entry $\Theta_{jk}$ models the interaction between field $j$ and field $k$ of the `dtype`. When $j$ or $k$ is categorical (including binary) the entry $\Theta_{jk}$ is really a matrix. Concretely, suppose $N_j=3$ and $N_k=5$ then, if we were to fit a 
+multinomial regression (the analog of logistic for categorical) of $X[:,j]$ on to $X[:,k]$ then there would be a $3 \times 5$ matrix of parameters in that model. (Note that much software often will set some of these to 0 automatically for identification reasons -- in this model with the penalty it is common not to do this). Anyways, we see that $\Theta_{jk}$ is really in $\mathbb{R}^{3 \times 5}$ and $\Theta_{kj} = \Theta_{jk}^T \in \mathbb{R}^{5 \times 3}$.
+
+The (or, an) analog of the $\ell_1$ penalty for the *matrix* $\Theta_{jk}$ is the Frobenius norm -- this is what the authors propose.
+
+
+
+
+### Relation to separate regressions
+
+In order to understand the relationships between columns it is tempting to simply regress each $X[:,j]$ onto all the other columns. The total objective in this case would be a sum of negative log-likelihoods and would look a lot like our pseudo-likelihood. The difference is that the pseudo-likelihood assumes symmetry and ties the parameters together this way. The separate regression framework drops this requirement.
+
+That is, the total loss for separate regressions is the same as the pseudo-likelihood
+but the pseudo-likelihood has linear constraints enforcing symmetry of the $\Theta$ "matrix".
+
+
+
+### Fitting the model
+
+The model can be fit by proximal gradient methods, so we really just have to compute the
+objective (as a function of $\Theta$ with $X$ fixed) and its gradient.
+
+As each term in the pseudo-likelihood is like a regression (negative log-) likelihood it is enough to have appropriate regression losses for each node.
+
+The proximal step is essentially the group LASSO proximal step (though here the parameters are matrices rather than vectors). By appropriate `vec` operations we should be able to use a group LASSO map.
+
+
+### TODO
+
+0. Create a *design matrix* `X` and a dict mapping fields of the dtype to columns. Should include a column of 1s. Continuous features enter as columns unchanged. Categorical features are coded using *full* representation, i.e. for a categorical with $N_j$ levels we want $N_j$ 1-hot columns in the design matrix. Our final $\Theta$ parameter will have shape $(X.shape[1], X.shape[1])$ and will be symmetric but we will store as regular `ndarray`.
+
+1. Create a representation of the pseudo-likelihood that can compute
+the maps
+$$
+\begin{aligned}
+\Theta & \mapsto \sum_{j=1}^p \ell_j\left(\Theta; X[:,j] | X[:,k], k \neq j \right) \\
+\Theta & \mapsto \nabla_{\Theta} \sum_{j=1}^p \ell_j\left(\Theta; X[:,j] | X[:,k], k \neq j \right)
+\end{aligned}
+$$
+Note that $\ell_j$ depends only on $\Theta[j]$ and differentiating with respect to
+a term like $\Theta[j,k]$ will involve only the losses $\ell_k$ and $\ell_j$.
+
+2. Make a group LASSO penalty for the $\Theta$ matrix that sets $\infty$ penalty on the "diagonal" terms $\Theta[j,j]$.
+
+3. We should be able to just write the loss as a sum of saturated losses for each *response* composed with `X.dot(Theta[j])`, i.e.
+
+     loss(theta) = sum([s_loss(X.dot(Theta[j])) for s_loss in saturated_losses])
+
+4. For a categorical variable with $N_j$ levels `X.dot(Theta[j])` should have shape `(n, N_j)` and this product should effectively zero out any *self* terms in the sum over the
+$\sum_j N_j$ in the matrix product. I.e. I am imaging that feature $j$ has been allocated $N_j$ columns in $X$ (the usual 1-hot encoding of multinomials).
+
+5. If we can write out the objective with a single `X` matrix, then I think the $\Theta[j,k]$ gradient will simply look at the `k` rows of the `j` loss plus the `j` rows of the `k` loss.
+
+
+### Toy example
+
+Let's make a data frame with 7 features, 2 binary, 2 categorical and 3 continuous. We'll code the binary as multinomial.
+
+```{python}
+import numpy as np, pandas as pd
+from itertools import product
+import matplotlib.pyplot as plt
+# %matplotlib inline
+
+
+D = pd.read_csv('atl06.csv') # .iloc[:5000]
+D = D.dropna()
+del(D['Unnamed: 0'])
+D.columns, D.shape
+```
+
+```{python}
+def make_onehot(categorical_col):  #TODO: would be more robust to know labels beforehand
+                                   # e.g. for cross-validation
+    labels = sorted(np.unique(categorical_col))
+    return np.equal.outer(np.asarray(categorical_col), labels)
+
+def make_design(df, desc):
+    design = [np.ones((df.shape[0], 1))] # column for intercept
+    new_desc = [('intercept', None, slice(0, 1))]
+    idx = 1
+    for col, dtype in desc:
+        if dtype in ['binary', 'categorical']:
+            design_col = make_onehot(df[col])
+            ncol = design_col.shape[1]
+            design.append(design_col)
+            new_desc.append((col, dtype, slice(idx, idx + ncol)))
+            idx += ncol
+        elif dtype == 'continuous': # a continuous one
+            new_desc.append((col, dtype, slice(idx, idx+1)))
+            design_col = np.asarray(df[col].copy())
+            # should we standardize?
+            design_col.shape = (-1,1)
+            design.append(design_col)
+            idx += 1
+    return np.hstack(design), new_desc
+
+desc = [('s_li', 'continuous'),
+        ('q_flag', 'binary'),
+        ('snr', 'continuous'),
+        ('h_rb', 'continuous'),
+        ('dh_fit_dx', 'continuous'),
+        ('b_snow_conf', 'categorical'),
+        ('c_flg_asr', 'categorical'),
+        ('c_flg_atm', 'categorical'),
+        ('msw', 'categorical' ),
+        #('bsnow_h', 'continuous'),
+        #('bsnow_od', 'continuous'),
+        ('layer_flag', 'binary'),
+        ('bckgrd', 'continuous'),
+        ('e_bckgrd', 'continuous'),
+        ('n_fit_photons', 'continuous'),
+        ('w_surface_window_final', 'continuous')]
+desc
+(np.mean(D['bsnow_od'] == D['bsnow_od'].max()), 
+ np.mean(D['bsnow_h'] == D['bsnow_h'].max()))
+np.percentile(D['w_surface_window_final'], [2,98])
+```
+
+```{python}
+X, desc2 = make_design(D, desc)
+desc2
+np.unique(D['snr']), np.unique(D['h_rb'])
+```
+
+```{python}
+[(len(np.unique(D[c])), t) for c, t, _ in desc2[1:]]
+```
+
+### Form saturated losses 
+
+This will use the `regreg` package: `http://github.com/jonathan-taylor/regreg.git`
+
+For `binary` or `categorical` we will use multinomial loss, while for `continuous`
+we will use Gaussian loss (i.e. squared error). We probably want to rescale each loss a little based on the variability under the *null* model.
+
+```{python}
+from regreg.smooth.mglm import multinomial_loglike
+from regreg.smooth.glm import gaussian_loglike
+import regreg.api as rr
+
+desc3 = []
+for var, dtype, idx in desc2:
+    if dtype in ['binary', 'categorical']:
+        response = X[:,idx]
+        desc3.append((var, dtype, idx,
+                         multinomial_loglike(response.shape,
+                                             response)))
+    elif dtype == 'continuous':
+        response = np.squeeze(X[:,idx]) # it will be a 2D array
+        if var not in ['snr', 'w_surface_window_final']:
+            l, u = np.percentile(response, [5, 95]) # quick and dirty cleaning..
+            response = np.clip(response, l, u)
+        elif var == 'w_surface_window_final':
+            l, u = np.percentile(response, [2, 98]) # quick and dirty cleaning..
+            response = np.clip(response, l, u)
+        response /= np.std(response)
+        X[:,idx] = response[:,None]
+        
+        desc3.append((var, dtype, idx,
+                         gaussian_loglike(response.shape,
+                                          response)))
+    else:
+        desc3.append((var, dtype, idx, None))
+
+desc3[-1]
+```
+
+```{python}
+np.isnan(X[:,4]).sum(), X.std(0)
+```
+
+### Combine losses into a smooth objective function
+
+```{python}
+def _reshape(G):
+    if G.ndim == 1:
+        return G.reshape((-1, 1))
+    return G
+
+class full_loss(rr.smooth_atom):
+    
+    def __init__(self,
+                 X,
+                 desc,
+                 symmetrize=True,
+                 coef=1.,
+                 offset=None,
+                 quadratic=None,
+                 case_weights=None,
+                 initial=None):
+        
+        (self.X, 
+         self.desc,
+         self.symmetrize) = (X, desc, symmetrize)
+
+        rr.smooth_atom.__init__(self,
+                                shape=(X.shape[1]**2),
+                                coef=coef,
+                                offset=offset,
+                                quadratic=quadratic,
+                                initial=initial)
+        
+        self._grad_buff = np.zeros((X.shape[1], 
+                                    X.shape[1]))
+        
+    def smooth_objective(self, arg, mode='both', check_feasibility=False):
+        
+        arg = self.apply_offset(arg)
+        matrix_arg = arg.reshape((self._grad_buff.shape))
+        
+        eta = natural_param = self.X.dot(matrix_arg) # again of shape as X
+        
+        if mode == 'func':
+            _f = [_loss.smooth_objective(np.squeeze(eta[:,_slice]), 'func') 
+                  for _, _, _slice, _loss in self.desc if _loss is not None]
+            return self.scale(np.sum(_f))
+        elif mode == 'grad':
+            _g = [_reshape(_loss.smooth_objective(np.squeeze(eta[:,_slice]), 
+                                                  'grad')) 
+                  for _, _, _slice, _loss in self.desc if _loss is not None]
+            self._grad_buff[:,1:] = self.scale(self.X.T.dot(np.hstack(_g)))
+            self._grad_buff[:,0] = 0
+            if self.symmetrize:
+                return 0.5 * (self._grad_buff + self._grad_buff.T).reshape(-1)
+            else:
+                return self._grad_buff.copy()
+        elif mode == 'both':
+            _f = [_loss.smooth_objective(np.squeeze(eta[:,_slice]), 'func') 
+                  for _, _, _slice, _loss in self.desc if _loss is not None]
+            _g = [_reshape(_loss.smooth_objective(np.squeeze(eta[:,_slice]), 
+                                                  'grad'))
+                  for _, _, _slice, _loss in self.desc if _loss is not None]
+            self._grad_buff[:,1:] = self.scale(self.X.T.dot(np.hstack(_g)))
+            self._grad_buff[:,0] = 0
+            if self.symmetrize:
+                return (self.scale(np.sum(_f)), 
+                        0.5 * (self._grad_buff + self._grad_buff.T).reshape(-1))
+            else:
+                return (self.scale(np.sum(_f)), 
+                        self._grad_buff.copy())
+```
+
+```{python}
+loss = full_loss(X, desc3)
+F, G = loss.smooth_objective(np.zeros(loss.shape), 'both')
+G.shape
+X.std(0)
+```
+
+### Construct penalty
+
+The basic penalty is a group lasso for every "block" $\Theta[k,j]$. We've flattened
+$\Theta$ above so we can just use the usual group LASSO penalty.
+
+The penality is
+$$
+{\cal P}(\Theta) = \lambda \sum_{(j,k): j < k} w_{(j,k)} \|\Theta[j,k]\|_F
+$$
+where
+$$
+\|A\|_F = Tr(A^TA)^{1/2} = \left(\sum_{i,j} A_{ij}^2 \right)^{1/2}
+$$
+
+```{python}
+R, C = np.zeros((2, X.shape[1], X.shape[1]), np.int)
+var_names = list(D.columns) + ['intercept']
+
+for l, r in product(desc3, desc3):
+    l_slice = l[2]
+    r_slice = r[2]
+    R[l_slice][:,r_slice] = R[r_slice][:,l_slice] = var_names.index(r[0])
+    C[l_slice][:,r_slice] = C[r_slice][:,l_slice] = var_names.index(l[0])  
+I = np.transpose(np.array([R, C]), [1, 2, 0])
+I.shape
+```
+
+```{python}
+B2_slice, M1_slice = desc3[1][2], desc3[2][2]
+B2_slice, M1_slice
+```
+
+```{python}
+I[B2_slice][:,M1_slice][:,:,0], I[M1_slice][:,B2_slice][:,:,0]
+```
+
+```{python}
+I[B2_slice][:,M1_slice][:,:,1], I[M1_slice][:,B2_slice][:,:,1]
+```
+
+```{python}
+groups = ['-'.join(sorted([var_names[r], var_names[c]])) for r, c in zip(R.reshape(-1), C.reshape(-1))]
+len(groups), groups[:40]
+```
+
+```{python}
+weights = {}
+covs = {}
+for d in desc3:
+    X_ = X[:,d[2]]
+    X_ -= X_.mean(0)
+    C_ = X_.T.dot(X_) / X_.shape[0]
+    covs[d[0]] = np.diag(C_).sum()
+    
+for l, r in product(covs.keys(), covs.keys()):
+    weights['-'.join(sorted([l, r]))] = np.sqrt(covs[l] * covs[r])
+    if l == r:
+        weights['-'.join([l, r])] = np.inf
+```
+
+```{python}
+penalty = rr.group_lasso(list(groups), weights=weights, lagrange=5 * np.sqrt(X.shape[0]))
+penalty.shape
+penalty
+```
+
+```{python}
+loss
+```
+
+```{python}
+problem = rr.simple_problem(loss, penalty)
+problem
+```
+
+```{python}
+soln = problem.solve(max_its=10)
+```
+
+```{python}
+soln = problem.solve(start_step=1e-4, debug=True)
+```
+
+```{python}
+soln = _329
+```
+
+```{python}
+matrix_soln = soln.reshape((X.shape[1], X.shape[1]))
+plt.imshow(matrix_soln != 0)
+plt.colorbar()
+```
+
+```{python}
+f = plt.figure(figsize=(8,8))
+ax = plt.gca()
+ax.imshow(matrix_soln, cmap='RdBu', interpolation='nearest', vmin=-10, vmax=10)
+ylim, xlim = ax.get_ylim(), ax.get_xlim()
+ax.xaxis.set_ticks(np.cumsum([X[:,d[2]].shape[1] for d in desc3]) - 0.5)
+ax.yaxis.set_ticks(np.cumsum([X[:,d[2]].shape[1] for d in desc3]) - 0.5)
+ax.set_xticklabels([d[0] for d in desc3], rotation=270)
+ax.set_yticklabels([d[0] for d in desc3])
+ax.grid(color='gray', linewidth=1, linestyle='--')
+f
+```
+
+```{python}
+desc3
+```
+
+```{python}
+group_keys = sorted(weights.keys())
+group_img = np.array([group_keys.index(g) for g in groups]).reshape((X.shape[1], X.shape[1]))
+```
+
+```{python}
+plt.imshow(group_img)
+plt.colorbar()
+```
+
+```{python}
+np.unique(group_img).shape
+```
+
+```{python}
+len(group_keys)
+```
+
+```{python}
+# problem.solve??
+```
+
+```{python}
+# rr.FISTA.fit??
+```
+
+```{python}
+# plt.imshow?
+```
+
+```{python}
+
+```

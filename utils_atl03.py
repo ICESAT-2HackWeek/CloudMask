@@ -34,13 +34,21 @@ def filter(string, substr):
     return [str for str in string if
              any(sub in str for sub in substr)] 
 
+def df_filter (df, my_lat, my_lon, w, lat_col_name = "lat", lon_col_name = "lon"):
+    
+    window_lat = delta_lat(my_lat, my_lon, w)
+    window_lon = delta_lon(my_lat, my_lon, w) 
+    
+    return df [ (df[lat_col_name] < my_lat + window_lat) & (df[lon_col_name] < my_lon + window_lon) &
+                (df[lat_col_name] > my_lat - window_lat) & (df[lon_col_name] > my_lon - window_lon) ]
+
 def file_in_dir(path):
     return [f for f in listdir(path) if isfile(join(path, f))]
 
 
 ### ATL03 Retrieval
 
-def read_atl03 (lat, lon, date_range, delta_m, path = "new_ATL03"):
+def read_atl03 (lat, lon, date_range, delta_m, path = "new_ATL03", extent = None):
     
     """
     Read a ATL03 file based and retieve individual photons in a window around a
@@ -49,10 +57,17 @@ def read_atl03 (lat, lon, date_range, delta_m, path = "new_ATL03"):
     
     # Spatial extend
     
-    window_lat = delta_lat(lat, lon, delta_m)
-    window_lon = delta_lon(lat, lon, delta_m)
+    if extent == None:
+
+        window_lat = delta_lat(lat, lon, delta_m)
+        window_lon = delta_lon(lat, lon, delta_m)
     
-    spatial_extent = [ lon - window_lon, lat - window_lat, lon + window_lon, lat + window_lat ]
+        spatial_extent = [ lon - window_lon, lat - window_lat, lon + window_lon, lat + window_lat ]
+    
+    else:
+
+        spatial_extent = extent 
+    
     spatial_extent = [ float(x) for x in spatial_extent ]
     
     # Retreiving the data 
@@ -67,10 +82,10 @@ def read_atl03 (lat, lon, date_range, delta_m, path = "new_ATL03"):
     region_a.download_granules(path)
         
     flist = file_in_dir(path)
-    assert len(flist) > 0, "There are not available granules for these parameters"
+    assert len(flist) > 0, "There are not available granules for these parameters. Check that the h5 files were download in path"
         
         
-    dataframes = pd.DataFrame(columns = ["h_ph", "lon_ph", "lat_ph"])
+    dataframes = pd.DataFrame(columns = ["h_ph", "lon_ph", "lat_ph", "ground_track"])
     
     for file in flist:
         
@@ -87,11 +102,19 @@ def read_atl03 (lat, lon, date_range, delta_m, path = "new_ATL03"):
                 
                 df = pd.DataFrame.from_dict({"h_ph": h_ph,
                                              "lon_ph": lon_ph,
-                                             "lat_ph": lat_ph} )
+                                             "lat_ph": lat_ph,
+                                             "ground_track": [my_gt] * len(h_ph) } )
     
-                df = df [ (df["lat_ph"] < lat + window_lat) & (df["lon_ph"] < lon + window_lon) &
-                          (df["lat_ph"] > lat - window_lat) & (df["lon_ph"] > lon - window_lon) ]
-        
+                if extent == None:
+
+                    df = df [ (df["lat_ph"] < lat + window_lat) & (df["lon_ph"] < lon + window_lon) &
+                              (df["lat_ph"] > lat - window_lat) & (df["lon_ph"] > lon - window_lon) ]
+
+                else:
+
+                    df = df [ (df["lat_ph"] < extent[3]) & (df["lon_ph"] < extent[2]) &
+                              (df["lat_ph"] > extent[1]) & (df["lon_ph"] > extent[0]) ]
+
                 dataframes = dataframes.append(df, ignore_index=True)
     
     return dataframes

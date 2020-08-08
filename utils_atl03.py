@@ -68,7 +68,7 @@ def read_atl03 (lat, lon, date_range, delta_m, path = "new_ATL03", extent = None
 
         spatial_extent = extent 
     
-    spatial_extent = [ float(x) for x in spatial_extent ]
+    spatial_extent = [ float(x) for x in spatial_extent ]  # This line has to be remove after solving Issue 82 in Icepyx
     
     # Retreiving the data 
     

@@ -1,40 +1,40 @@
 import h5py
+import os
 import numpy as np
 from sklearn.neighbors import BallTree
+from astropy.time import Time
 
 
-def associate(dataframe, swath, variable='Integer_Cloud_Mask'):
-    """Takes a dataframe, and a satellite file, and extracts the
-    selected variable as a new column.
+def get_file_in_directory(path): 
+    """
+    Retrieves file names from a directory \
+    \n\nInput: path = directory \
+    \n\nOutput: list of subdirectories
+    """
 
-    Assumes that data coordinates are in lat/lon
-    Assumes dataframe higher resolution than swath"""
+    # The last conditional here is in order to ignore the /DS_store file in macs 
+    return [os.path.join(path, name) for name in os.listdir(path)
+            if (os.path.isfile(os.path.join(path, name)) and (not name.startswith('.')))  ]
+
+
+def is_file_in_directory(fname, path):
+    """
+    True if a file with the name 'fname' is in 'path' 
+    """
+    nfiles = get_file_in_directory(path)
     
-    # grab swath coordinates
-    # TODO; make general for inferring lat/lon paths
-    latS = np.array(swath['geolocation_data']['latitude'])
-    lonS = np.array(swath['geolocation_data']['longitude'])
-
-    S_rad = np.vstack([lonS[:].ravel(),latS[:].ravel()]).T
-    S_rad *= np.pi / 180.
-
-    # grab dataframe coords
-    latF = dataframe.lat.values
-    lonF = dataframe.lon.values
-
-    F_rad = np.vstack([lonF[:].ravel(),latF[:].ravel()]).T
-    F_rad *= np.pi / 180.
-
-    # build spatial tree; find matches
-    print("building tree")
-    S_Ball = BallTree(S_rad,metric='haversine')
-    print("searching data")
-    indicies = S_Ball.query(F_rad, k=1,
-                            breadth_first=True,
-                            return_distance=False)
+    for f in nfiles:
+        if fname in f:
+            return True
     
-    extract = swath['geophysical_data'][variable].value
-    new_column = extract.ravel()[indicies]
-    dataframe[variable] = new_column
-    return dataframe
+    return False 
+
+
+def gps2dyr(time):
+    """
+    Converte GPS time to decimal years.
+    """
+    #return Time(time, format='gps').decimalyear
+    return Time(time, format='gps').datetime
+
 

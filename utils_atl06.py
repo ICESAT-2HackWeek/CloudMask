@@ -3,7 +3,9 @@ import os
 import numpy as np
 import pandas as pd
 from pathlib import Path
-from icepyx import icesat2data as ipd
+from icepyx import query as ipd
+#from icepyx import icesat2data as ipd
+
 
 
 from utils import *
@@ -139,11 +141,12 @@ def read_atl06 (spatial_extent,
                 user = 'fsapienza', 
                 email = 'fsapienza@berkeley.edu'):
     
-    region_a = ipd.Icesat2Data("ATL06", spatial_extent, date_range, start_time = time_start, end_time = time_end)
-    
+    region_a = ipd.Query("ATL06", spatial_extent, date_range, start_time = time_start, end_time = time_end)
+    #region_a = ipd.Icesat2Data("ATL06", spatial_extent, date_range, start_time = time_start, end_time = time_end)
+
     avail_granules = region_a.avail_granules(ids=True)
 
-    print(region_a.avail_granules(ids=True))
+    print("Available Granules:", region_a.avail_granules(ids=True))
 
     if len(avail_granules) == 0:
         print("No granules for this specification")

@@ -1,6 +1,16 @@
 import numpy as np
 from sklearn.neighbors import BallTree
 
+
+def viirs_date(viirs_file_name):
+    """
+    Given the name of a VIIRS file, it returns the date
+    """
+    
+    date = int(viirs_file_name[-33:-26] + viirs_file_name[-25:-21] )
+    return pd.to_datetime(date, format="%Y%j%H%M")
+
+
 def associate(rad_1, rad_2, k_nn = 1):
     
     """

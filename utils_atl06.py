@@ -144,10 +144,15 @@ def read_atl06 (spatial_extent,
     region_a = ipd.Query("ATL06", spatial_extent, date_range, start_time = time_start, end_time = time_end)
     #region_a = ipd.Icesat2Data("ATL06", spatial_extent, date_range, start_time = time_start, end_time = time_end)
 
-    avail_granules = region_a.avail_granules(ids=True)
+    # The last update of icepyx returns a dictonary with the total number of granules and also a list of one element that contains
+    # a list with the name of the available granules. This is the reason why we have [0] at the end of the next line.
+    # - check if this is always the case. For now, I will add an assert. 
+    
+    avail_granules = region_a.avail_granules(ids=True)[0]
+    print("Available Granules:", avail_granules)
 
-    print("Available Granules:", region_a.avail_granules(ids=True))
-
+    assert region_a.avail_granules()['Number of available granules'] == len(avail_granules), "The number of avail granules does not match"
+    
     if len(avail_granules) == 0:
         print("No granules for this specification")
         return None

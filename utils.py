@@ -3,6 +3,7 @@ import os
 import numpy as np
 from sklearn.neighbors import BallTree
 from astropy.time import Time
+from sklearn.utils import shuffle
 
 
 def get_file_in_directory(path): 
@@ -38,3 +39,23 @@ def gps2dyr(time):
     return Time(time, format='gps').datetime
 
 
+def merge_df_from_dict(dictonary, entries_to_merge = "all", shuffle = False):
+    """
+    Takes a dictonary with keys associated to a pandas dataframe with the same column and marges all the dataframes into a single one
+    """
+    
+    if entries_to_merge == "all":
+        entries = list(dictonary.keys())
+    else:
+        entries = entries_to_merge
+        
+    dfs = []
+    for x in entries:
+        dfs.append(dictonary[x])
+        
+    df = pd.concat(dfs, ignore_index=True)
+    
+    if shuffle:
+        df = shuffle(df).reset_index(drop=True)
+        
+    return df

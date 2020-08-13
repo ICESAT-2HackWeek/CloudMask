@@ -1,9 +1,11 @@
 import h5py
 import os
 import numpy as np
+import pandas as pd
 from sklearn.neighbors import BallTree
 from astropy.time import Time
 from sklearn.utils import shuffle
+import matplotlib.pyplot as plt
 
 
 def get_file_in_directory(path): 
@@ -39,7 +41,7 @@ def gps2dyr(time):
     return Time(time, format='gps').datetime
 
 
-def merge_df_from_dict(dictonary, entries_to_merge = "all", shuffle = False):
+def merge_df_from_dict(dictonary, entries_to_merge = "all", shuff = False):
     """
     Takes a dictonary with keys associated to a pandas dataframe with the same column and marges all the dataframes into a single one
     """
@@ -55,7 +57,22 @@ def merge_df_from_dict(dictonary, entries_to_merge = "all", shuffle = False):
         
     df = pd.concat(dfs, ignore_index=True)
     
-    if shuffle:
+    if shuff:
         df = shuffle(df).reset_index(drop=True)
         
     return df
+
+
+def hist_df(df, var, by, bins = 50):
+    """
+    Plots an histogram grouping by 'by' using the column 'var' of a pandas dataframes
+    """
+    classes = np.unique(df[by])
+    
+    for c in classes:
+        _ = plt.hist( list(df[ df[by] == c ][var] ), bins, alpha = 0.5, label = c )
+
+    plt.title("Histogram of " + str(var) + " grouped by " + str(by))
+    plt.legend()
+    plt.show
+    return None

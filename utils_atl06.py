@@ -6,10 +6,10 @@ from pathlib import Path
 from icepyx import query as ipd
 #from icepyx import icesat2data as ipd
 
-
-
 from utils import *
 
+## To do:
+## - Add column for number of track and beam. Find which one is the weak and strong beam
 
 def read_atl06_fromfile(fname, outdir='data', bbox=None):
     """
@@ -26,7 +26,7 @@ def read_atl06_fromfile(fname, outdir='data', bbox=None):
     dataframes = []  # one dataframe per track
     
     with h5py.File(fname, 'r') as fi:
-    
+            
         # Check which ground tracks are present in this file
         gtracks = sorted(['/'+k for k in fi.keys() if k.startswith('gt')])
 
@@ -37,42 +37,97 @@ def read_atl06_fromfile(fname, outdir='data', bbox=None):
             
             # Put it first in the dict for column ordering:
             data['ground_track'] = None 
-            data['t_year'] = None # difference between this and np.nan?
+            data['time'] = None # difference between this and np.nan?
             data['segment_id'] = fi[g+'/segment_quality/segment_id'][:]
             
             # Ground Track
             npts = len(data['segment_id']) # we use the number of segment_id as reference for the total number of measuraments
             data['ground_track'] = [g[1:]] * npts
+            # In order to know which one is the strong and weak beam, we need to know the orientation of tha spacecraft. ICESat-2 operates 
+            # between two different modes: forward and backward. For each one of this modes, the strong and weak will correspond to left and right 
+            # in a different way. For more details, see Section 7.5 in ATL03 Manual. 
+            icesat_orientation = fi['/orbit_info/sc_orient'][:][0]
+            reference_track = g[-1]
+            if (icesat_orientation == 0 and reference_track == 'l') or (icesat_orientation == 1 and reference_track == 'r'):
+                data['beam_strength'] = ['strong'] * npts
+            else:
+                data['beam_strength'] = ['weak'] * npts
             
             # Time
             delta_t = fi[g+'/land_ice_segments/delta_time'][:]     # for time conversion
             t_ref = fi['/ancillary_data/atlas_sdp_gps_epoch'][:]     # single value
             t_gps = t_ref + delta_t  # Time in GPS seconds (secs since Jan 5, 1980)
-            data['t_year'] = gps2dyr(t_gps) # GPS sec to datetime
+            data['time'] = gps2dyr(t_gps) # GPS sec to datetime
 
+            ### General ###
             
-            # Load vars into memory (include as many as you want)
+            # Latitude
             data['lat'] = fi[g+'/land_ice_segments/latitude'][:]
+            # Longitude
             data['lon'] = fi[g+'/land_ice_segments/longitude'][:]
-            data['h_li'] = fi[g+'/land_ice_segments/h_li'][:]
-            data['s_li'] = fi[g+'/land_ice_segments/h_li_sigma'][:]
+            # Standard land-ice segment height determined by land ice algorithm with bias corrections
+            data['height'] = fi[g+'/land_ice_segments/h_li'][:]            
+            # Along-track slope from along-track segment fit
+            data['slope_dx'] = fi[g+'/land_ice_segments/fit_statistics/dh_fit_dx'][:]
+            # Signal-to-noise ratio in the final refined window
+            data['snr'] = fi[g+'/land_ice_segments/fit_statistics/snr'][:]
+
+            ### Flags ###
+            
+            # Quality flag. Zero indicates that no data-quality tests have found a problem 
             data['q_flag'] = fi[g+'/land_ice_segments/atl06_quality_summary'][:]
-            data['s_fg'] = fi[g+'/land_ice_segments/fit_statistics/signal_selection_source'][:]
-            data['snr'] = fi[g+'/land_ice_segments/fit_statistics/snr_significance'][:]
+            # The quality summary will be desactivated (=0) if all the following conditions are satisfied
+            # 1) h_robust_spread < 1 (meters)
+            # Robust dispersion estimate of misfit between photon events heights and the along track segment fit
             data['h_rb'] = fi[g+'/land_ice_segments/fit_statistics/h_robust_sprd'][:]
-            data['dh_fit_dx'] = fi[g+'/land_ice_segments/fit_statistics/dh_fit_dx'][:]
-            data['b_snow_conf'] = fi[g+'/land_ice_segments/geophysical/bsnow_conf'][:]
-            data['c_flg_asr'] = fi[g+'/land_ice_segments/geophysical/cloud_flg_asr'][:]
-            data['c_flg_atm'] = fi[g+'/land_ice_segments/geophysical/cloud_flg_atm'][:]
-            data['msw'] = fi[g+'/land_ice_segments/geophysical/msw_flag'][:]
-            data['bsnow_h'] = fi[g+'/land_ice_segments/geophysical/bsnow_h'][:]
-            data['bsnow_od'] = fi[g+'/land_ice_segments/geophysical/bsnow_od'][:]
-            data['layer_flag'] = fi[g+'/land_ice_segments/geophysical/layer_flag'][:]
-            data['bckgrd'] = fi[g+'/land_ice_segments/geophysical/bckgrd'][:]
-            data['e_bckgrd'] = fi[g+'/land_ice_segments/geophysical/e_bckgrd'][:]
+            # 2) h_li_sigma < 1 (meters)
+            # Propagation error due to sample error 
+            data['height_sigma'] = fi[g+'/land_ice_segments/h_li_sigma'][:]            
+            # 3) snr_significance < 0.02
+            # Probability that signal-finding routine would converge to at least the observed signal-to-noise (SNR) for a random
+            # noise input. 
+            data['snr_significance'] = fi[g+'/land_ice_segments/fit_statistics/snr_significance'][:]
+            # 4) Signal_selection_source \in {0,1}
+            # this variable takes values in {0,1,2,3} based on which algorithms was used to compute the heights, if possible
+            data['s_fg'] = fi[g+'/land_ice_segments/fit_statistics/signal_selection_source'][:]
+            # 5) n_fit_photons / W_surface_window_final > 1 Photon events / meter (weak beam)
+            #    n_fit_photons / W_surface_window_final > 4 Photon events / meter (strong beam)
             data['n_fit_photons'] = fi[g+'/land_ice_segments/fit_statistics/n_fit_photons'][:]
+            data['w_surface_window_final'] = fi[g+'/land_ice_segments/fit_statistics/w_surface_window_final'][:]            
+            data['n_fit_photons_ratio_w'] = data['n_fit_photons'] / data['w_surface_window_final']
+            
+            ### Blowing Snow ###
+            
+            # Confidence flag from presence of blowing snow. 0 = Clear with high confidence, 1 = clear with medium confidence
+            data['blowing_snow_conf'] = fi[g+'/land_ice_segments/geophysical/bsnow_conf'][:]
+            # Blowing snow layer top height. This is zero in cases where such a layer is not detected (b_snow_conf = 1)
+            data['blowing_snow_h'] = fi[g+'/land_ice_segments/geophysical/bsnow_h'][:]
+            # Optical Tickness of blowing snow layer
+            data['blowing_snow_od'] = fi[g+'/land_ice_segments/geophysical/bsnow_od'][:]
+
+            ### Cloud Flags ###
+            # Cloud flag (probably) from apparent surface reflectance based on ATL09
+            data['c_flg_asr'] = fi[g+'/land_ice_segments/geophysical/cloud_flg_asr'][:]
+            # Number of layers found from the backscatter profile using DDA layer finder
+            data['c_flg_atm'] = fi[g+'/land_ice_segments/geophysical/cloud_flg_atm'][:]
+            
+            ### More Flags ###
+            
+            # Multiple scattering warning flag
+            data['msw'] = fi[g+'/land_ice_segments/geophysical/msw_flag'][:]
+            # Consolidated cloud flag (combination of cloud_flg_atm, cloud_flg_asr, bsnow_conf) and it takes daytime/nightime into consideration
+            # 0 = likely abscence of clouds or blowing snow
+            data['layer_flag'] = fi[g+'/land_ice_segments/geophysical/layer_flag'][:]
+            
+            ### Backgrounds Photons ###
+            
+            # background count rate
+            data['background'] = fi[g+'/land_ice_segments/geophysical/bckgrd'][:]
+            # Expected background count rate
+            data['background_expected'] = fi[g+'/land_ice_segments/geophysical/e_bckgrd'][:]
+            
+            
             #data['end_geoseg'] = fi['/ancillary_data/end_geoseg'][:]
-            data['w_surface_window_final'] = fi[g+'/land_ice_segments/fit_statistics/w_surface_window_final'][:]
 
             #print("date", fi["ancillary_data/data_end_utc"][:])
             
@@ -171,9 +226,9 @@ def read_atl06 (spatial_extent,
         region_a.earthdata_login(user, email)
         #region_a.order_vars.avail(options=True)
         region_a.order_vars.append(var_list=['latitude','longitude','h_li','h_li_sigma','atl06_quality_summary','delta_time',
-                                             'signal_selection_source','snr_significance','h_robust_sprd','dh_fit_dx','bsnow_conf',
+                                             'signal_selection_source', 'snr', 'snr_significance','h_robust_sprd','dh_fit_dx','bsnow_conf',
                                              'cloud_flg_asr','cloud_flg_atm','msw_flag','bsnow_h','bsnow_od','layer_flag','bckgrd',
-                                             'e_bckgrd','n_fit_photons','end_geoseg','segment_id','w_surface_window_final'])
+                                             'e_bckgrd','n_fit_photons','end_geoseg','segment_id','w_surface_window_final', 'sc_orient'])
         region_a.subsetparams(Coverage=region_a.order_vars.wanted)
         region_a.order_granules()
         region_a.download_granules(path)
@@ -191,7 +246,7 @@ def read_atl06 (spatial_extent,
                 file_is_in_folder = True
                 break
         if not file_is_in_folder:
-            print( fname_granules, " not found")
+            print( fname_granules, "not found")
             
     if len(avail_granules) != len(requested_files):
         print("You are missing some files. There are a total of", len(avail_granules), "available granules but you are accessing", len(requested_files), "h5 files")

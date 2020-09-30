@@ -11,7 +11,7 @@ from utils import *
 ## To do:
 ## - Add column for number of track and beam. Find which one is the weak and strong beam
 
-def read_atl06_fromfile(fname, outdir='data', bbox=None):
+def read_atl06_fromfile(fname, add_flags=True, outdir='data', bbox=None):
     """
     Read one ATL06 file and output 6 reduced files. 
     
@@ -69,6 +69,8 @@ def read_atl06_fromfile(fname, outdir='data', bbox=None):
             data['height'] = fi[g+'/land_ice_segments/h_li'][:]            
             # Along-track slope from along-track segment fit
             data['slope_dx'] = fi[g+'/land_ice_segments/fit_statistics/dh_fit_dx'][:]
+            # Across-track slepe from weak and strong beam
+            data['slope_dy'] = fi[g+'/land_ice_segments/fit_statistics/dh_fit_dy'][:]
             # Signal-to-noise ratio in the final refined window
             data['snr'] = fi[g+'/land_ice_segments/fit_statistics/snr'][:]
 
@@ -78,7 +80,7 @@ def read_atl06_fromfile(fname, outdir='data', bbox=None):
             data['q_flag'] = fi[g+'/land_ice_segments/atl06_quality_summary'][:]
             # The quality summary will be desactivated (=0) if all the following conditions are satisfied
             # 1) h_robust_spread < 1 (meters)
-            # Robust dispersion estimate of misfit between photon events heights and the along track segment fit
+            # Robust dispersion estimator of misfit between photon events heights and the along track segment fit
             data['h_rb'] = fi[g+'/land_ice_segments/fit_statistics/h_robust_sprd'][:]
             # 2) h_li_sigma < 1 (meters)
             # Propagation error due to sample error 
@@ -105,7 +107,7 @@ def read_atl06_fromfile(fname, outdir='data', bbox=None):
             # Optical Tickness of blowing snow layer
             data['blowing_snow_od'] = fi[g+'/land_ice_segments/geophysical/bsnow_od'][:]
 
-            ### Cloud Flags ###
+            ### Cloud= Flags ###
             # Cloud flag (probably) from apparent surface reflectance based on ATL09
             data['c_flg_asr'] = fi[g+'/land_ice_segments/geophysical/cloud_flg_asr'][:]
             # Number of layers found from the backscatter profile using DDA layer finder
@@ -151,8 +153,18 @@ def read_atl06_fromfile(fname, outdir='data', bbox=None):
             if not all( [ len(data[x]) == len(data['segment_id']) for x in data.keys() ] ):
                 print("Missing Data: There are {len(data['segment_id'])} different segments in this selection but ... elements associated to the varirable ..." )
                 continue
+                
+            df = pd.DataFrame.from_dict(data)
+            
+            if add_flags:
+                
+                df['q_flag_1'] = df.apply(lambda row: 1 if (row.h_rb >= 1) else 0, axis = 1)
+                df['q_flag_2'] = df.apply(lambda row: 1 if (row.height_sigma >= 1) else 0, axis = 1)
+                df['q_flag_3'] = df.apply(lambda row: 1 if (row.snr_significance >= 0.02) else 0, axis = 1)
+                df['q_flag_4'] = df.apply(lambda row: 1 if (row.s_fg > 1) else 0, axis = 1)
+                df['q_flag_5'] = df.apply(lambda row: 1 if ( (row.beam_strength == 'strong' and row.n_fit_photons_ratio_w <= 4) or (row.beam_strength == 'weak'   and row.n_fit_photons_ratio_w <= 1) ) else 0, axis = 1)
                     
-            dataframes.append(pd.DataFrame.from_dict(data))
+            dataframes.append(df)
         
     return dataframes
 
@@ -226,7 +238,7 @@ def read_atl06 (spatial_extent,
         region_a.earthdata_login(user, email)
         #region_a.order_vars.avail(options=True)
         region_a.order_vars.append(var_list=['latitude','longitude','h_li','h_li_sigma','atl06_quality_summary','delta_time',
-                                             'signal_selection_source', 'snr', 'snr_significance','h_robust_sprd','dh_fit_dx','bsnow_conf',
+                                             'signal_selection_source', 'snr', 'snr_significance','h_robust_sprd','dh_fit_dx','dh_fit_dy','bsnow_conf',
                                              'cloud_flg_asr','cloud_flg_atm','msw_flag','bsnow_h','bsnow_od','layer_flag','bckgrd',
                                              'e_bckgrd','n_fit_photons','end_geoseg','segment_id','w_surface_window_final', 'sc_orient'])
         region_a.subsetparams(Coverage=region_a.order_vars.wanted)

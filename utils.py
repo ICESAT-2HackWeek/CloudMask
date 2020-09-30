@@ -2,10 +2,12 @@ import h5py
 import os
 import numpy as np
 import pandas as pd
+import seaborn as sns
 from sklearn.neighbors import BallTree
 from astropy.time import Time
 from sklearn.utils import shuffle
 import matplotlib.pyplot as plt
+from sklearn.metrics import accuracy_score, f1_score, recall_score
 
 
 def get_file_in_directory(path): 
@@ -76,3 +78,60 @@ def hist_df(df, var, by, bins = 50):
     plt.legend()
     plt.show
     return None
+
+
+def print_attrs_h5(h5file, counter = 0):
+    '''
+    Print all the atrivbutes from a h5 file
+    '''
+    for key in h5file.keys():
+    
+        try:
+            print_attrs_h5(h5file[key], counter + 1)
+            
+        except:
+            print('\t'*counter, end = '')
+            print(key)
+            
+def p_a_cond_b (df, a, b):
+    """
+    Given a dataframes df, it computes the empirial conditionl probability
+    """    
+    
+    assert all(np.unique(df[a]) == [0,1]), "Variable must be binary"
+    assert all(np.unique(df[b]) == [0,1]), "Variable must be binary"
+    
+    p_b = df[df[b] == 1].shape[0]
+    p_a_b = df[(df[a] == 1) & (df[b] == 1)].shape[0]
+    
+    return p_a_b / p_b
+
+def conditional_heatplot(df, variables, plot = True):
+    """
+    Given a dataframes and a list of binary column names, it returns the matrix of all the conditional probabilities
+    """
+    
+    res = np.zeros((len(variables), len(variables)))
+    
+    for i, x in enumerate(variables):
+        for j, y in enumerate(variables):
+            if i == j:
+                res[i,j] = np.nan
+                continue
+            res[i,j] = p_a_cond_b(df, a = x, b = y)
+            
+    if plot:
+        ax = sns.heatmap(res, annot=True, cmap = sns.color_palette("Blues"))        
+    
+    return res
+
+
+def fit_scores(y_true, y_fit):
+    
+    res = {}
+    
+    res['accuracy'] = accuracy_score(y_true, y_fit)
+    res['f1'] = f1_score(y_true, y_fit)
+    res['recall'] = recall_score(y_true, y_fit)
+    
+    return res

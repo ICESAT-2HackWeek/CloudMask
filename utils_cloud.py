@@ -6,17 +6,39 @@ from sklearn.neighbors import BallTree
 def viirs_date(viirs_file_name):
     """
     Given the name of a VIIRS file, it returns the date
-    """
     
+    Example of a valid VIIRS file:
+    CLDMSK_L2_VIIRS_SNPP.A2020163.1642.001.2020164010320.nc
+    
+    A full description of the product could be found here:
+    https://ladsweb.modaps.eosdis.nasa.gov/missions-and-measurements/products/CLDMSK_L2_VIIRS_SNPP/
+    """
+    assert len(viirs_file_name) == 55, "The name of the VIIRS file is in an incorrect format"
     date = int(viirs_file_name[-33:-26] + viirs_file_name[-25:-21] )
     return pd.to_datetime(date, format="%Y%j%H%M")
 
+
+def modis_date(modis_file_name):
+    """
+    Given the name of a MODIS file, it returns the date
+    
+    Example of a valid MODIS file:
+    MYD35_L2.A2020140.0350.061.2020140153933.hdf
+    
+    A full description of the product could be found here:
+    
+    """
+    assert len(modis_file_name) == 44, "The name of the MODIS file is in an incorrect format"
+    date = int(modis_file_name[-17:-4])
+    return pd.to_datetime(date, format="%Y%j%H%M%S")
+    
 
 def associate(rad_1, rad_2, k_nn = 1):
     
     """
     Given two grids rad_1 and rad_2, this associates each point in rad_2 to the k-nearest neighbours in
     rad_1.
+    Pairs of the form [latitude, longitude]
     """
     
     # Room to improvement:

@@ -13,7 +13,7 @@ from utils import *
 
 def read_atl06_fromfile(fname, add_flags=True, outdir='data', bbox=None):
     """
-    Read one ATL06 file and output 6 reduced files. 
+    Read one ATL06 file and output a single dataframes. 
     
     Extract variables of interest and separate the ATL06 file 
     into each beam (ground track) and ascending/descending orbits.

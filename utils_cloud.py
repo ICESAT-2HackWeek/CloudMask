@@ -29,8 +29,16 @@ def modis_date(modis_file_name):
     
     """
     assert len(modis_file_name) == 44, "The name of the MODIS file is in an incorrect format"
-    date = int(modis_file_name[-17:-4])
-    return pd.to_datetime(date, format="%Y%j%H%M%S")
+    
+    l = modis_file_name.split('.')
+    year = l[1][1:5]
+    day = l[1][5:8]
+    hour_min = l[2]
+    date = year + day + hour_min
+    return pd.to_datetime(date, format="%Y%j%H%M")
+    
+    #date = int(modis_file_name[-17:-4])
+    #return pd.to_datetime(date, format="%Y%j%H%M%S")
     
 
 def associate(rad_1, rad_2, k_nn = 1):

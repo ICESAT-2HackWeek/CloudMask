@@ -3,7 +3,9 @@ import os
 import numpy as np
 import pandas as pd
 from pathlib import Path
-from icepyx import query as ipd
+
+import icepyx as ipx
+#from icepyx import query as ipd
 #from icepyx import icesat2data as ipd
 
 from utils import *
@@ -208,7 +210,7 @@ def read_atl06 (spatial_extent,
                 user = 'fsapienza', 
                 email = 'fsapienza@berkeley.edu'):
     
-    region_a = ipd.Query("ATL06", spatial_extent, date_range, start_time = time_start, end_time = time_end)
+    region_a = ipx.Query("ATL06", spatial_extent, date_range, start_time = time_start, end_time = time_end)
     #region_a = ipd.Icesat2Data("ATL06", spatial_extent, date_range, start_time = time_start, end_time = time_end)
 
     # The last update of icepyx returns a dictonary with the total number of granules and also a list of one element that contains
@@ -234,14 +236,18 @@ def read_atl06 (spatial_extent,
         print("You already donwload all the requiered files")
         
     else:
-    
+
         region_a.earthdata_login(user, email)
-        #region_a.order_vars.avail(options=True)
-        region_a.order_vars.append(var_list=['latitude','longitude','h_li','h_li_sigma','atl06_quality_summary','delta_time',
-                                             'signal_selection_source', 'snr', 'snr_significance','h_robust_sprd','dh_fit_dx','dh_fit_dy','bsnow_conf',
-                                             'cloud_flg_asr','cloud_flg_atm','msw_flag','bsnow_h','bsnow_od','layer_flag','bckgrd',
-                                             'e_bckgrd','n_fit_photons','end_geoseg','segment_id','w_surface_window_final', 'sc_orient'])
-        region_a.subsetparams(Coverage=region_a.order_vars.wanted)
+
+        # This lines were commented after the last update of icepyx. See Issue https://github.com/icesat2py/icepyx/issues/145
+    
+        #region_a.order_vars.append(var_list=['latitude','longitude','h_li','h_li_sigma','atl06_quality_summary','delta_time',
+        #                                     'signal_selection_source', 'snr', 'snr_significance','h_robust_sprd','dh_fit_dx','dh_fit_dy','bsnow_conf',
+        #                                     'cloud_flg_asr','cloud_flg_atm','msw_flag','bsnow_h','bsnow_od','layer_flag','bckgrd',
+        #                                     'e_bckgrd','n_fit_photons','end_geoseg','segment_id','w_surface_window_final', 'sc_orient'])
+
+        #region_a.subsetparams(Coverage=region_a.order_vars.wanted)
+    
         region_a.order_granules()
         region_a.download_granules(path)
     

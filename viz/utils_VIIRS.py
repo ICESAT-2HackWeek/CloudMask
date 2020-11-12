@@ -7,7 +7,7 @@ import hvplot.xarray
 import matplotlib.pyplot as plt
 
 # path with VIIRS's retrieval files
-path_viirs_retrieve = "VIIRS_bash/"
+path_viirs_retrieve = "data/VIIRS_bash/"
 # original bash file 
 exe_old = "VIIRS-Greenland-download.sh"
 # output bash file 

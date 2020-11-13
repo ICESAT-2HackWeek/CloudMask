@@ -3,6 +3,25 @@ import pandas as pd
 from sklearn.neighbors import BallTree
 
 
+def CLDMSK_date(file_name):
+    """
+    Given the name of a VIIRS or MODIS Aqua CLDMSK product, it returns the date
+    
+    Example of a valid VIIRS file:
+    CLDMSK_L2_VIIRS_SNPP.A2020163.1642.001.2020164010320.nc
+    Example of a valid MODIS Aqua file:
+    CLDMSK_L2_MODIS_Aqua.A2020139.1755.001.2020140163713.nc
+    
+    A full description of the product could be found here:
+    https://ladsweb.modaps.eosdis.nasa.gov/missions-and-measurements/products/CLDMSK_L2_VIIRS_SNPP/
+    """
+    assert len(file_name) == 55, "The name of the CLDMSK file is in an incorrect format"
+    date = int(file_name[-33:-26] + file_name[-25:-21] )
+    return pd.to_datetime(date, format="%Y%j%H%M")
+
+  
+    
+
 def viirs_date(viirs_file_name):
     """
     Given the name of a VIIRS file, it returns the date
@@ -13,29 +32,30 @@ def viirs_date(viirs_file_name):
     A full description of the product could be found here:
     https://ladsweb.modaps.eosdis.nasa.gov/missions-and-measurements/products/CLDMSK_L2_VIIRS_SNPP/
     """
+    print('I recommend to use CLDMSK_date instead of viirs_date')
     assert len(viirs_file_name) == 55, "The name of the VIIRS file is in an incorrect format"
     date = int(viirs_file_name[-33:-26] + viirs_file_name[-25:-21] )
     return pd.to_datetime(date, format="%Y%j%H%M")
 
 
-def modis_date(modis_file_name):
-    """
-    Given the name of a MODIS file, it returns the date
+#def modis_date(modis_file_name):
+#    """
+#    Given the name of a MODIS file, it returns the date
+#    
+#    Example of a valid MODIS file:
+#    MYD35_L2.A2020140.0350.061.2020140153933.hdf
     
-    Example of a valid MODIS file:
-    MYD35_L2.A2020140.0350.061.2020140153933.hdf
+#    A full description of the product could be found here:
     
-    A full description of the product could be found here:
+#    """
+#    assert len(modis_file_name) == 44, "The name of the MODIS file is in an incorrect format"
     
-    """
-    assert len(modis_file_name) == 44, "The name of the MODIS file is in an incorrect format"
-    
-    l = modis_file_name.split('.')
-    year = l[1][1:5]
-    day = l[1][5:8]
-    hour_min = l[2]
-    date = year + day + hour_min
-    return pd.to_datetime(date, format="%Y%j%H%M")
+#    l = modis_file_name.split('.')
+#    year = l[1][1:5]
+#    day = l[1][5:8]
+#    hour_min = l[2]
+#    date = year + day + hour_min
+#    return pd.to_datetime(date, format="%Y%j%H%M")
     
     #date = int(modis_file_name[-17:-4])
     #return pd.to_datetime(date, format="%Y%j%H%M%S")

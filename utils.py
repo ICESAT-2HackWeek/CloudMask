@@ -9,6 +9,7 @@ from astropy.time import Time
 from sklearn.utils import shuffle
 import matplotlib.pyplot as plt
 from sklearn.metrics import accuracy_score, f1_score, recall_score
+from shapely import geometry
 
 ##### Directories ######
 
@@ -207,5 +208,8 @@ def drainage_basin(basin = 6.2,
 
     # Add first vertice to the end of the array
     spatial_extent.append(spatial_extent[0])
+    
+    # Build shapely polygon
+    poly = geometry.Polygon(spatial_extent)
 
-    return spatial_extent
+    return poly

@@ -161,7 +161,7 @@ def read_atl06_fromfile(fname, add_flags=True, outdir='data', bbox=None):
                     continue
 
                 if not all( [ len(data[x]) == len(data['segment_id']) for x in data.keys() ] ):
-                    print("Missing Data: There are {len(data['segment_id'])} different segments in this selection but ... elements associated to the varirable ..." )
+                    print("Missing Data: The total number of segments stored in the different variables in the h5 file for ATL06 have different size. This prohibits us from building the dataframes and match the different segments." )
                     continue
 
                 df = pd.DataFrame.from_dict(data)

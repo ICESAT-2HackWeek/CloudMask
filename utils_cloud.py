@@ -1,6 +1,8 @@
 import numpy as np
 import pandas as pd
 from sklearn.neighbors import BallTree
+from shapely import geometry
+from shapely.ops import unary_union
 
 
 def CLDMSK_date(file_name):
@@ -85,3 +87,36 @@ def associate(rad_1, rad_2, k_nn = 1):
     assert rad_2.shape[0] == indices.shape[0]
     
     return distances, indices
+
+
+
+def image_convexHull (lonA, latA):
+    """
+    Given the longitude and latitude 2-dimensional arrays of a image, it returns a shapely polygon object
+    corresponding to the convex hull of the image. 
+    """
+    
+    assert lonA.shape == latA.shape
+    
+    N, M = lonA.shape
+    
+    contour_points = []
+    
+    for i in range(N): 
+        contour_points.append( (lonA[i, 0], latA[i, 0]) )
+        contour_points.append( (lonA[i, M-1], latA[i, M-1]) )
+    for i in range(M):
+        contour_points.append( (lonA[0, i], latA[0,i]) )
+        contour_points.append( (lonA[N-1, i], latA[N-1, i]) )
+        
+    contour_points = [x for x in contour_points if ( ( -180 <= x[0] ) 
+                                                   & ( x[0] <= 180 )
+                                                   & ( -90 <= x[1] )
+                                                   & ( x[1] <= 90) )]
+    
+    points = geometry.MultiPoint(contour_points)
+    
+    cloud_contour = points.convex_hull
+    cloud_contour = cloud_contour.simplify(tolerance = 0.01)
+    
+    return cloud_contour

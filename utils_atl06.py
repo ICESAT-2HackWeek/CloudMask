@@ -222,7 +222,12 @@ def read_atl06 (spatial_extent,
                 user = 'fsapienza', 
                 email = 'fsapienza@berkeley.edu'):
     
-    region_a = ipx.Query("ATL06", spatial_extent, date_range, start_time = time_start, end_time = time_end)
+    try:
+        region_a = ipx.Query("ATL06", spatial_extent, date_range, start_time = time_start, end_time = time_end)
+    except:
+        print("No granules for this specification")
+        return None
+    
     #region_a = ipd.Icesat2Data("ATL06", spatial_extent, date_range, start_time = time_start, end_time = time_end)
 
     # The last update of icepyx returns a dictonary with the total number of granules and also a list of one element that contains
